@@ -12,7 +12,8 @@
 
 */
 
-
+#ifndef _RADIOINTEFACE_H_
+#define _RADIOINTEFACE_H_
 
 #include "sigProcLib.h"  
 #include "GSMCommon.h"
@@ -171,3 +172,5 @@ public:
 		       int wSPS = SAMPSPERSYM,
 		       GSM::Time wStartTime = GSM::Time(0));
 };
+
+#endif /* _RADIOINTEFACE_H_ */
