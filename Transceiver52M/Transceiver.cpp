@@ -1,5 +1,5 @@
 /*
-* Copyright 2008, 2009, 2010 Free Software Foundation, Inc.
+* Copyright 2008, 2009, 2010, 2012 Free Software Foundation, Inc.
 *
 * This software is distributed under the terms of the GNU Public License.
 * See the COPYING file in the main directory for details.
@@ -51,17 +51,15 @@ using namespace GSM;
 Transceiver::Transceiver(int wBasePort,
 			 const char *TRXAddress,
 			 int wSamplesPerSymbol,
-			 GSM::Time wTransmitLatency,
-			 RadioInterface *wRadioInterface)
+			 RadioInterface *wRadioInterface,
+			 DriveLoop *wDriveLoop,
+			 int wChannel)
 	:mDataSocket(wBasePort+2,TRXAddress,wBasePort+102),
 	 mControlSocket(wBasePort+1,TRXAddress,wBasePort+101),
 	 mClockSocket(wBasePort,TRXAddress,wBasePort+100),
-	 mTSC(-1)
+	 mDriveLoop(wDriveLoop), mTransmitPriorityQueue(NULL),
+	 mChannel(wChannel), mTSC(-1)
 {
-  //GSM::Time startTime(0,0);
-  //GSM::Time startTime(gHyperframe/2 - 4*216*60,0);
-  GSM::Time startTime(random() % gHyperframe,0);
-
   mFIFOServiceLoopThread = new Thread(32768);  ///< thread to push bursts into transmit FIFO
   mControlServiceLoopThread = new Thread(32768);       ///< thread to process control messages from GSM core
   mTransmitPriorityQueueServiceLoopThread = new Thread(32768);///< thread to process transmit bursts from GSM core
@@ -69,37 +67,24 @@ Transceiver::Transceiver(int wBasePort,
 
   mSamplesPerSymbol = wSamplesPerSymbol;
   mRadioInterface = wRadioInterface;
-  mTransmitLatency = wTransmitLatency;
-  mTransmitDeadlineClock = startTime;
-  mLastClockUpdateTime = startTime;
-  mLatencyUpdateTime = startTime;
-  mRadioInterface->getClock()->set(startTime);
+  mLastClockUpdateTime = GSM::Time(0, 0); 
   mMaxExpectedDelay = 0;
+
+  mTransmitDeadlineClock = wDriveLoop->deadlineClock();
 
   // generate pulse and setup up signal processing library
   gsmPulse = generateGSMPulse(2,mSamplesPerSymbol);
   LOG(DEBUG) << "gsmPulse: " << *gsmPulse;
-  sigProcLibSetup(mSamplesPerSymbol);
 
   txFullScale = mRadioInterface->fullScaleInputValue();
   rxFullScale = mRadioInterface->fullScaleOutputValue();
 
-  // initialize filler tables with dummy bursts, initialize other per-timeslot variables
+  // initialize per-timeslot variables
   for (int i = 0; i < 8; i++) {
-    signalVector* modBurst = modulateBurst(gDummyBurst,*gsmPulse,
-					   8 + (i % 4 == 0),
-					   mSamplesPerSymbol);
-    scaleVector(*modBurst,txFullScale);
-    fillerModulus[i]=26;
-    for (int j = 0; j < 102; j++) {
-      fillerTable[j][i] = new signalVector(*modBurst);
-    }
-    delete modBurst;
-    mChanType[i] = NONE;
     channelResponse[i] = NULL;
     DFEForward[i] = NULL;
     DFEFeedback[i] = NULL;
-    channelEstimateTime[i] = startTime;
+    channelEstimateTime[i] = GSM::Time(0, 0);
   }
 
   mOn = false;
@@ -107,14 +92,15 @@ Transceiver::Transceiver(int wBasePort,
   mRxFreq = 0.0;
   mPower = -10;
   mEnergyThreshold = INIT_ENERGY_THRSHD;
-  prevFalseDetectionTime = startTime;
+  prevFalseDetectionTime = GSM::Time(0, 0);
+
+  mRadioLocked = mRadioInterface->started();
 }
 
 Transceiver::~Transceiver()
 {
   delete gsmPulse;
-  sigProcLibDestroy();
-  mTransmitPriorityQueue.clear();
+  mTransmitPriorityQueue->clear();
 }
   
 
@@ -128,199 +114,18 @@ void Transceiver::addRadioVector(BitVector &burst,
 					 mSamplesPerSymbol);
   scaleVector(*modBurst,txFullScale * pow(10,-RSSI/10));
   radioVector *newVec = new radioVector(*modBurst,wTime);
-  mTransmitPriorityQueue.write(newVec);
+  mTransmitPriorityQueue->write(newVec);
 
   delete modBurst;
 }
 
-#ifdef TRANSMIT_LOGGING
-void Transceiver::unModulateVector(signalVector wVector) 
-{
-  SoftVector *burst = demodulateBurst(wVector,
-				   *gsmPulse,
-				   mSamplesPerSymbol,
-				   1.0,0.0);
-  LOG(DEBUG) << "LOGGED BURST: " << *burst;
-
-/*
-  unsigned char burstStr[gSlotLen+1];
-  SoftVector::iterator burstItr = burst->begin();
-  for (int i = 0; i < gSlotLen; i++) {
-    // FIXME: Demod bits are inverted!
-    burstStr[i] = (unsigned char) ((*burstItr++)*255.0);
-  }
-  burstStr[gSlotLen]='\0';
-  LOG(DEBUG) << "LOGGED BURST: " << burstStr;
-*/
-  delete burst;
-}
-#endif
-
-void Transceiver::pushRadioVector(GSM::Time &nowTime)
-{
-
-  // dump stale bursts, if any
-  unsigned BCCH_SCH_FCCH_CCCH_Frames[26] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,30,31,40,41};
-
-  while (radioVector* staleBurst = mTransmitPriorityQueue.getStaleBurst(nowTime)) {
-    // Even if the burst is stale, put it in the fillter table.
-    // (It might be an idle pattern.)
-    // Now we do it only for BEACON channels.
-    LOG(NOTICE) << "dumping STALE burst in TRX->USRP interface";
-    const GSM::Time& nextTime = staleBurst->getTime();
-    int TN = nextTime.TN();
-    int modFN = nextTime.FN() % fillerModulus[TN];
-    if (TN==0) {
-       for (unsigned i =0; i < 26; i++) {
-         if(BCCH_SCH_FCCH_CCCH_Frames[i] == modFN) {
-            delete fillerTable[modFN][TN];
-            fillerTable[modFN][TN] = staleBurst;
-            break;
-         }
-       }
-    }
-  }
-  
-  int TN = nowTime.TN();
-  int modFN = nowTime.FN() % fillerModulus[nowTime.TN()];
-
-  // if queue contains data at the desired timestamp, stick it into FIFO
-  if (radioVector *next = (radioVector*) mTransmitPriorityQueue.getCurrentBurst(nowTime)) {
-    LOG(DEBUG) << "transmitFIFO: wrote burst " << next << " at time: " << nowTime;
-    if (TN==0) {
-       for (unsigned i =0; i < 26; i++) {
-         if(BCCH_SCH_FCCH_CCCH_Frames[i] == modFN) {
-            delete fillerTable[modFN][TN];
-            fillerTable[modFN][TN] = new signalVector(*(next));
-            break;
-         }
-       }
-    }
-    mRadioInterface->driveTransmitRadio(*(next),(mChanType[TN]==NONE)); //fillerTable[modFN][TN]));
-    delete next;
-#ifdef TRANSMIT_LOGGING
-    if (nowTime.TN()==TRANSMIT_LOGGING) { 
-      unModulateVector(*(fillerTable[modFN][TN]));
-    }
-#endif
-    return;
-  }
-
-  // otherwise, pull filler data, and push to radio FIFO
-  mRadioInterface->driveTransmitRadio(*(fillerTable[modFN][TN]),(mChanType[TN]==NONE));
-#ifdef TRANSMIT_LOGGING
-  if (nowTime.TN()==TRANSMIT_LOGGING) 
-    unModulateVector(*fillerTable[modFN][TN]);
-#endif
-
-}
-
-void Transceiver::setModulus(int timeslot)
-{
-  switch (mChanType[timeslot]) {
-  case NONE:
-  case I:
-  case II:
-  case III:
-  case FILL:
-    fillerModulus[timeslot] = 26;
-    break;
-  case IV:
-  case VI:
-  case V:
-    fillerModulus[timeslot] = 51;
-    break;
-    //case V: 
-  case VII:
-    fillerModulus[timeslot] = 102;
-    break;
-  case XIII:
-    fillerModulus[timeslot] = 52;
-    break;
-  default:
-    break;
-  }
-}
-
-
-Transceiver::CorrType Transceiver::expectedCorrType(GSM::Time currTime)
-{
-  
-  unsigned burstTN = currTime.TN();
-  unsigned burstFN = currTime.FN();
-
-  switch (mChanType[burstTN]) {
-  case NONE:
-    return OFF;
-    break;
-  case FILL:
-    return IDLE;
-    break;
-  case I:
-    return TSC;
-    /*if (burstFN % 26 == 25) 
-      return IDLE;
-    else
-      return TSC;*/
-    break;
-  case II:
-    return TSC;
-    break;
-  case III:
-    return TSC;
-    break;
-  case IV:
-  case VI:
-    return RACH;
-    break;
-  case V: {
-    int mod51 = burstFN % 51;
-    if ((mod51 <= 36) && (mod51 >= 14))
-      return RACH;
-    else if ((mod51 == 4) || (mod51 == 5))
-      return RACH;
-    else if ((mod51 == 45) || (mod51 == 46))
-      return RACH;
-    else
-      return TSC;
-    break;
-  }
-  case VII:
-    if ((burstFN % 51 <= 14) && (burstFN % 51 >= 12))
-      return IDLE;
-    else
-      return TSC;
-    break;
-  case XIII: {
-    int mod52 = burstFN % 52;
-    if ((mod52 == 12) || (mod52 == 38))
-      return RACH;
-    else if ((mod52 == 25) || (mod52 == 51))
-      return IDLE;
-    else
-      return TSC;
-    break;
-  }
-  case LOOPBACK:
-    if ((burstFN % 51 <= 50) && (burstFN % 51 >=48))
-      return IDLE;
-    else
-      return TSC;
-    break;
-  default:
-    return OFF;
-    break;
-  }
-
-}
-    
 SoftVector *Transceiver::pullRadioVector(GSM::Time &wTime,
 				      int &RSSI,
 				      int &timingOffset)
 {
   bool needDFE = (mMaxExpectedDelay > 1);
 
-  radioVector *rxBurst = (radioVector *) mReceiveFIFO->get();
+  radioVector *rxBurst = (radioVector *) mReceiveFIFO->read();
 
   if (!rxBurst) return NULL;
 
@@ -328,9 +133,9 @@ SoftVector *Transceiver::pullRadioVector(GSM::Time &wTime,
 
   int timeslot = rxBurst->getTime().TN();
 
-  CorrType corrType = expectedCorrType(rxBurst->getTime());
+  DriveLoop::CorrType corrType = mDriveLoop->expectedCorrType(mChannel, rxBurst->getTime());
 
-  if ((corrType==OFF) || (corrType==IDLE)) {
+  if ((corrType == DriveLoop::OFF) || (corrType == DriveLoop::IDLE)) {
     delete rxBurst;
     return NULL;
   }
@@ -340,6 +145,7 @@ SoftVector *Transceiver::pullRadioVector(GSM::Time &wTime,
   complex amplitude = 0.0;
   float TOA = 0.0;
   float avgPwr = 0.0;
+
   if (!energyDetect(*vectorBurst,20*mSamplesPerSymbol,mEnergyThreshold,&avgPwr)) {
      LOG(DEBUG) << "Estimated Energy: " << sqrt(avgPwr) << ", at time " << rxBurst->getTime();
      double framesElapsed = rxBurst->getTime()-prevFalseDetectionTime;
@@ -357,7 +163,7 @@ SoftVector *Transceiver::pullRadioVector(GSM::Time &wTime,
 
   // run the proper correlator
   bool success = false;
-  if (corrType==TSC) {
+  if (corrType == DriveLoop::TSC) {
     LOG(DEBUG) << "looking for TSC at time: " << rxBurst->getTime();
     signalVector *channelResp;
     double framesElapsed = rxBurst->getTime()-channelEstimateTime[timeslot];
@@ -431,7 +237,7 @@ SoftVector *Transceiver::pullRadioVector(GSM::Time &wTime,
   // demodulate burst
   SoftVector *burst = NULL;
   if ((rxBurst) && (success)) {
-    if ((corrType==RACH) || (!needDFE)) {
+    if ((corrType == DriveLoop::RACH) || (!needDFE)) {
       burst = demodulateBurst(*vectorBurst,
 			      *gsmPulse,
 			      mSamplesPerSymbol,
@@ -458,6 +264,44 @@ SoftVector *Transceiver::pullRadioVector(GSM::Time &wTime,
   return burst;
 }
 
+void Transceiver::pullFIFO()
+{
+  SoftVector *rxBurst = NULL;
+  int RSSI;
+  int TOA;  // in 1/256 of a symbol
+  GSM::Time burstTime;
+
+  rxBurst = pullRadioVector(burstTime,RSSI,TOA);
+
+  if (rxBurst) {
+    LOG(DEBUG) << "burst parameters: "
+               << " time: " << burstTime
+               << " RSSI: " << RSSI
+               << " TOA: "  << TOA
+               << " bits: " << *rxBurst;
+
+    char burstString[gSlotLen+10];
+    burstString[0] = burstTime.TN();
+    for (int i = 0; i < 4; i++) {
+            burstString[1+i] = (burstTime.FN() >> ((3-i)*8)) & 0x0ff;
+    }
+
+    burstString[5] = RSSI;
+    burstString[6] = (TOA >> 8) & 0x0ff;
+    burstString[7] = TOA & 0x0ff;
+    SoftVector::iterator burstItr = rxBurst->begin();
+
+    for (unsigned int i = 0; i < gSlotLen; i++) {
+            burstString[8+i] =(char) round((*burstItr++)*255.0);
+    }
+
+    burstString[gSlotLen+9] = '\0';
+    delete rxBurst;
+
+    mDataSocket.write(burstString,gSlotLen+10);
+  }
+}
+
 void Transceiver::start()
 {
   mControlServiceLoopThread->start((void * (*)(void*))ControlServiceLoopAdapter,(void*) this);
@@ -465,9 +309,7 @@ void Transceiver::start()
 
 void Transceiver::reset()
 {
-  mTransmitPriorityQueue.clear();
-  //mTransmitFIFO->clear();
-  //mReceiveFIFO->clear();
+  mTransmitPriorityQueue->clear();
 }
 
   
@@ -492,7 +334,7 @@ void Transceiver::driveControl()
   char response[MAX_PACKET_LENGTH];
 
   sscanf(buffer,"%3s %s",cmdcheck,command);
- 
+
   writeClockInterface();
 
   if (strcmp(cmdcheck,"CMD")!=0) {
@@ -514,7 +356,9 @@ void Transceiver::driveControl()
       if (!mOn) {
         // Prepare for thread start
         mPower = -20;
-        mRadioInterface->start();
+        if (mRadioInterface->start())
+          mDriveLoop->start();
+
         generateRACHSequence(*gsmPulse,mSamplesPerSymbol);
 
         // Start radio interface threads.
@@ -539,6 +383,8 @@ void Transceiver::driveControl()
     sscanf(buffer,"%3s %s %d",cmdcheck,command,&newGain);
     newGain = mRadioInterface->setRxGain(newGain);
     mEnergyThreshold = INIT_ENERGY_THRSHD;
+    if (!mRadioLocked)
+      newGain = mRadioInterface->setRxGain(newGain);
     sprintf(response,"RSP SETRXGAIN 0 %d",newGain);
   }
   else if (strcmp(command,"NOISELEV")==0) {
@@ -558,7 +404,8 @@ void Transceiver::driveControl()
       sprintf(response,"RSP SETPOWER 1 %d",dbPwr);
     else {
       mPower = dbPwr;
-      mRadioInterface->setPowerAttenuation(dbPwr);
+      if (!mRadioLocked)
+        mRadioInterface->setPowerAttenuation(dbPwr);
       sprintf(response,"RSP SETPOWER 0 %d",dbPwr);
     }
   }
@@ -579,12 +426,18 @@ void Transceiver::driveControl()
     int freqKhz;
     sscanf(buffer,"%3s %s %d",cmdcheck,command,&freqKhz);
     mRxFreq = freqKhz*1.0e3+FREQOFFSET;
-    if (!mRadioInterface->tuneRx(mRxFreq)) {
-       LOG(ALERT) << "RX failed to tune";
-       sprintf(response,"RSP RXTUNE 1 %d",freqKhz);
-    }
-    else
+    mRadioLocked = mRadioInterface->started();
+
+    if (!mRadioLocked) {
+       if (!mRadioInterface->tuneRx(mRxFreq)) {
+         LOG(ALERT) << "RX failed to tune";
+         sprintf(response,"RSP RXTUNE 1 %d",freqKhz);
+      } else {
        sprintf(response,"RSP RXTUNE 0 %d",freqKhz);
+      }
+    } else {
+      sprintf(response,"RSP RXTUNE 0 %d",freqKhz);
+    }
   }
   else if (strcmp(command,"TXTUNE")==0) {
     // tune txmtr
@@ -592,12 +445,17 @@ void Transceiver::driveControl()
     sscanf(buffer,"%3s %s %d",cmdcheck,command,&freqKhz);
     //freqKhz = 890e3;
     mTxFreq = freqKhz*1.0e3+FREQOFFSET;
-    if (!mRadioInterface->tuneTx(mTxFreq)) {
-       LOG(ALERT) << "TX failed to tune";
-       sprintf(response,"RSP TXTUNE 1 %d",freqKhz);
+    mRadioLocked = mRadioInterface->started();
+    if (!mRadioLocked) {
+       if (!mRadioInterface->tuneTx(mTxFreq)) {
+         LOG(ALERT) << "TX failed to tune";
+         sprintf(response,"RSP TXTUNE 1 %d",freqKhz);
+       } else {
+         sprintf(response,"RSP TXTUNE 0 %d",freqKhz);
+       }
+    } else {
+        sprintf(response,"RSP TXTUNE 0 %d",freqKhz);
     }
-    else
-       sprintf(response,"RSP TXTUNE 0 %d",freqKhz);
   }
   else if (strcmp(command,"SETTSC")==0) {
     // set TSC
@@ -621,8 +479,8 @@ void Transceiver::driveControl()
       sprintf(response,"RSP SETSLOT 1 %d %d",timeslot,corrCode);
       return;
     }     
-    mChanType[timeslot] = (ChannelCombination) corrCode;
-    setModulus(timeslot);
+    mDriveLoop->setTimeslot(mChannel, timeslot, (DriveLoop::ChannelCombination) corrCode);
+    mDriveLoop->setModulus(mChannel, timeslot);
     sprintf(response,"RSP SETSLOT 0 %d %d",timeslot,corrCode);
 
   }
@@ -670,9 +528,9 @@ bool Transceiver::driveTransmitPriorityQueue()
 */
   
   // periodically update GSM core clock
-  LOG(DEBUG) << "mTransmitDeadlineClock " << mTransmitDeadlineClock
-		<< " mLastClockUpdateTime " << mLastClockUpdateTime;
-  if (mTransmitDeadlineClock > mLastClockUpdateTime + GSM::Time(216,0))
+  LOG(DEBUG) << "mTransmitDeadlineClock " << *mTransmitDeadlineClock
+             << " mLastClockUpdateTime " << mLastClockUpdateTime;
+  if (*mTransmitDeadlineClock > mLastClockUpdateTime + GSM::Time(216,0))
     writeClockInterface();
 
 
@@ -695,115 +553,19 @@ bool Transceiver::driveTransmitPriorityQueue()
 
 
 }
- 
-void Transceiver::driveReceiveFIFO() 
-{
-
-  SoftVector *rxBurst = NULL;
-  int RSSI;
-  int TOA;  // in 1/256 of a symbol
-  GSM::Time burstTime;
-
-  mRadioInterface->driveReceiveRadio();
-
-  rxBurst = pullRadioVector(burstTime,RSSI,TOA);
-
-  if (rxBurst) { 
-
-    LOG(DEBUG) << "burst parameters: "
-	  << " time: " << burstTime
-	  << " RSSI: " << RSSI
-	  << " TOA: "  << TOA
-	  << " bits: " << *rxBurst;
-    
-    char burstString[gSlotLen+10];
-    burstString[0] = burstTime.TN();
-    for (int i = 0; i < 4; i++)
-      burstString[1+i] = (burstTime.FN() >> ((3-i)*8)) & 0x0ff;
-    burstString[5] = RSSI;
-    burstString[6] = (TOA >> 8) & 0x0ff;
-    burstString[7] = TOA & 0x0ff;
-    SoftVector::iterator burstItr = rxBurst->begin();
-
-    for (unsigned int i = 0; i < gSlotLen; i++) {
-      burstString[8+i] =(char) round((*burstItr++)*255.0);
-    }
-    burstString[gSlotLen+9] = '\0';
-    delete rxBurst;
-
-    mDataSocket.write(burstString,gSlotLen+10);
-  }
-
-}
-
-void Transceiver::driveTransmitFIFO() 
-{
-
-  /**
-      Features a carefully controlled latency mechanism, to 
-      assure that transmit packets arrive at the radio/USRP
-      before they need to be transmitted.
-
-      Deadline clock indicates the burst that needs to be
-      pushed into the FIFO right NOW.  If transmit queue does
-      not have a burst, stick in filler data.
-  */
-
-
-  RadioClock *radioClock = (mRadioInterface->getClock());
-  
-  if (mOn) {
-    //radioClock->wait(); // wait until clock updates
-    LOG(DEBUG) << "radio clock " << radioClock->get();
-    while (radioClock->get() + mTransmitLatency > mTransmitDeadlineClock) {
-      // if underrun, then we're not providing bursts to radio/USRP fast
-      //   enough.  Need to increase latency by one GSM frame.
-      if (mRadioInterface->getWindowType() == RadioDevice::TX_WINDOW_USRP1) {
-        if (mRadioInterface->isUnderrun()) {
-          // only update latency at the defined frame interval
-          if (radioClock->get() > mLatencyUpdateTime + GSM::Time(USB_LATENCY_INTRVL)) {
-            mTransmitLatency = mTransmitLatency + GSM::Time(1,0);
-            LOG(INFO) << "new latency: " << mTransmitLatency;
-            mLatencyUpdateTime = radioClock->get();
-          }
-        }
-        else {
-          // if underrun hasn't occurred in the last sec (216 frames) drop
-          //    transmit latency by a timeslot
-          if (mTransmitLatency > GSM::Time(USB_LATENCY_MIN)) {
-              if (radioClock->get() > mLatencyUpdateTime + GSM::Time(216,0)) {
-              mTransmitLatency.decTN();
-              LOG(INFO) << "reduced latency: " << mTransmitLatency;
-              mLatencyUpdateTime = radioClock->get();
-            }
-          }
-        }
-      }
-      // time to push burst to transmit FIFO
-      pushRadioVector(mTransmitDeadlineClock);
-      mTransmitDeadlineClock.incTN();
-    }
-    
-  }
-  // FIXME -- This should not be a hard spin.
-  // But any delay here causes us to throw omni_thread_fatal.
-  //else radioClock->wait();
-}
-
-
 
 void Transceiver::writeClockInterface()
 {
   char command[50];
   // FIXME -- This should be adaptive.
-  sprintf(command,"IND CLOCK %llu",(unsigned long long) (mTransmitDeadlineClock.FN()+2));
+  sprintf(command,"IND CLOCK %llu",
+          (unsigned long long) (mTransmitDeadlineClock->FN() + 2));
 
   LOG(INFO) << "ClockInterface: sending " << command;
 
   mClockSocket.write(command,strlen(command)+1);
 
-  mLastClockUpdateTime = mTransmitDeadlineClock;
-
+  mLastClockUpdateTime = *mTransmitDeadlineClock;
 }   
   
 
@@ -811,11 +573,8 @@ void Transceiver::writeClockInterface()
 
 void *FIFOServiceLoopAdapter(Transceiver *transceiver)
 {
-  transceiver->setPriority();
-
   while (1) {
-    transceiver->driveReceiveFIFO();
-    transceiver->driveTransmitFIFO();
+    transceiver->pullFIFO();
     pthread_testcancel();
   }
   return NULL;

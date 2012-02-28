@@ -2,7 +2,7 @@
  * Written by Thomas Tsou <ttsou@vt.edu>
  * Based on code by Harvind S Samra <hssamra@kestrelsp.com>
  *
- * Copyright 2011 Free Software Foundation, Inc.
+ * Copyright 2011, 2012 Free Software Foundation, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published by
@@ -37,14 +37,7 @@ private:
 	GSM::Time mTime;
 };
 
-class VectorFIFO {
-public:
-	unsigned size();
-	void put(radioVector *ptr);
-	radioVector *get();
-
-private:
-	PointerFIFO mQ;
+class VectorFIFO : public InterthreadQueue<radioVector> {
 };
 
 class VectorQueue : public InterthreadPriorityQueue<radioVector> {

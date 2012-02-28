@@ -2,7 +2,7 @@
  * Written by Thomas Tsou <ttsou@vt.edu>
  * Based on code by Harvind S Samra <hssamra@kestrelsp.com>
  *
- * Copyright 2011 Free Software Foundation, Inc.
+ * Copyright 2011, 2012 Free Software Foundation, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published by
@@ -39,21 +39,6 @@ void radioVector::setTime(const GSM::Time& wTime)
 bool radioVector::operator>(const radioVector& other) const
 {
 	return mTime > other.mTime;
-}
-
-unsigned VectorFIFO::size()
-{
-	return mQ.size();
-}
-
-void VectorFIFO::put(radioVector *ptr)
-{
-	mQ.put((void*) ptr);
-}
-
-radioVector *VectorFIFO::get()
-{
-	return (radioVector*) mQ.get();
 }
 
 GSM::Time VectorQueue::nextTime() const

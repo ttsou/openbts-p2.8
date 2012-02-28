@@ -1,5 +1,5 @@
 /*
-* Copyright 2008 Free Software Foundation, Inc.
+* Copyright 2008, 2012 Free Software Foundation, Inc.
 *
 * This software is distributed under the terms of the GNU Public License.
 * See the COPYING file in the main directory for details.
@@ -29,6 +29,7 @@
 	TRANSMIT_LOGGING	write every burst on the given slot to a log
 */
 
+#include "DriveLoop.h"
 #include "radioInterface.h"
 #include "Interthread.h"
 #include "GSMCommon.h"
@@ -44,58 +45,27 @@
 class Transceiver {
   
 private:
-
-  GSM::Time mTransmitLatency;     ///< latency between basestation clock and transmit deadline clock
-  GSM::Time mLatencyUpdateTime;   ///< last time latency was updated
+  DriveLoop *mDriveLoop;
 
   UDPSocket mDataSocket;	  ///< socket for writing to/reading from GSM core
   UDPSocket mControlSocket;	  ///< socket for writing/reading control commands from GSM core
   UDPSocket mClockSocket;	  ///< socket for writing clock updates to GSM core
 
-  VectorQueue  mTransmitPriorityQueue;   ///< priority queue of transmit bursts received from GSM core
-  VectorFIFO*  mTransmitFIFO;     ///< radioInterface FIFO of transmit bursts 
+  VectorQueue  *mTransmitPriorityQueue;   ///< priority queue of transmit bursts received from GSM core
   VectorFIFO*  mReceiveFIFO;      ///< radioInterface FIFO of receive bursts 
 
   Thread *mFIFOServiceLoopThread;  ///< thread to push/pull bursts into transmit/receive FIFO
   Thread *mControlServiceLoopThread;       ///< thread to process control messages from GSM core
   Thread *mTransmitPriorityQueueServiceLoopThread;///< thread to process transmit bursts from GSM core
 
-  GSM::Time mTransmitDeadlineClock;       ///< deadline for pushing bursts into transmit FIFO 
+  int mChannel;                           ///< channelizer attach number between 0 and 'M-1'
+
+  GSM::Time *mTransmitDeadlineClock;      ///< deadline for pushing bursts into transmit FIFO 
   GSM::Time mLastClockUpdateTime;         ///< last time clock update was sent up to core
 
   RadioInterface *mRadioInterface;	  ///< associated radioInterface object
   double txFullScale;                     ///< full scale input to radio
   double rxFullScale;                     ///< full scale output to radio
-
-  /** Codes for burst types of received bursts*/
-  typedef enum {
-    OFF,               ///< timeslot is off
-    TSC,	       ///< timeslot should contain a normal burst
-    RACH,	       ///< timeslot should contain an access burst
-    IDLE	       ///< timeslot is an idle (or dummy) burst
-  } CorrType;
-
-
-  /** Codes for channel combinations */
-  typedef enum {
-    FILL,               ///< Channel is transmitted, but unused
-    I,                  ///< TCH/FS
-    II,                 ///< TCH/HS, idle every other slot
-    III,                ///< TCH/HS
-    IV,                 ///< FCCH+SCH+CCCH+BCCH, uplink RACH
-    V,                  ///< FCCH+SCH+CCCH+BCCH+SDCCH/4+SACCH/4, uplink RACH+SDCCH/4
-    VI,                 ///< CCCH+BCCH, uplink RACH
-    VII,                ///< SDCCH/8 + SACCH/8
-    VIII,               ///< TCH/F + FACCH/F + SACCH/M
-    IX,                 ///< TCH/F + SACCH/M
-    X,                  ///< TCH/FD + SACCH/MD
-    XI,                 ///< PBCCH+PCCCH+PDTCH+PACCH+PTCCH
-    XII,                ///< PCCCH+PDTCH+PACCH+PTCCH
-    XIII,               ///< PDTCH+PACCH+PTCCH
-    NONE,               ///< Channel is inactive, default
-    LOOPBACK            ///< similar go VII, used in loopback testing
-  } ChannelCombination;
-
 
   /** unmodulate a modulated burst */
 #ifdef TRANSMIT_LOGGING
@@ -115,29 +85,22 @@ private:
 			   int &RSSI,
 			   int &timingOffset);
    
-  /** Set modulus for specific timeslot */
-  void setModulus(int timeslot);
-
-  /** return the expected burst type for the specified timestamp */
-  CorrType expectedCorrType(GSM::Time currTime);
-
   /** send messages over the clock socket */
   void writeClockInterface(void);
+
+  void pullFIFO(void);                 ///< blocking call on receive FIFO 
 
   signalVector *gsmPulse;              ///< the GSM shaping pulse for modulation
 
   int mSamplesPerSymbol;               ///< number of samples per GSM symbol
 
   bool mOn;			       ///< flag to indicate that transceiver is powered on
-  ChannelCombination mChanType[8];     ///< channel types for all timeslots
   double mTxFreq;                      ///< the transmit frequency
   double mRxFreq;                      ///< the receive frequency
   int mPower;                          ///< the transmit power in dB
   int mTSC;                            ///< the midamble sequence code
   double mEnergyThreshold;             ///< threshold to determine if received data is potentially a GSM burst
   GSM::Time prevFalseDetectionTime;    ///< last timestamp of a false energy detection
-  int fillerModulus[8];                ///< modulus values of all timeslots, in frames
-  signalVector *fillerTable[102][8];   ///< table of modulated filler waveforms for all timeslots
   unsigned mMaxExpectedDelay;            ///< maximum expected time-of-arrival offset in GSM symbols
 
   GSM::Time    channelEstimateTime[8]; ///< last timestamp of each timeslot's channel estimate
@@ -147,6 +110,8 @@ private:
   signalVector *DFEFeedback[8];        ///< most recent DFE feedback filter of all timeslots
   float        chanRespOffset[8];      ///< most recent timing offset, e.g. TOA, of all timeslots
   complex      chanRespAmplitude[8];   ///< most recent channel amplitude of all timeslots
+
+  bool         mRadioLocked;
 
 public:
 
@@ -160,9 +125,9 @@ public:
   Transceiver(int wBasePort,
 	      const char *TRXAddress,
 	      int wSamplesPerSymbol,
-	      GSM::Time wTransmitLatency,
-	      RadioInterface *wRadioInterface);
-   
+	      RadioInterface *wRadioInterface,
+	      DriveLoop *wDriveLoop,
+	      int wChannel);
   /** Destructor */
   ~Transceiver();
 
@@ -173,7 +138,7 @@ public:
   void receiveFIFO(VectorFIFO *wFIFO) { mReceiveFIFO = wFIFO;}
 
   /** attach the radioInterface transmit FIFO */
-  void transmitFIFO(VectorFIFO *wFIFO) { mTransmitFIFO = wFIFO;}
+  void transmitQueue(VectorQueue *wQ) { mTransmitPriorityQueue = wQ; }
 
 protected:
 
