@@ -1,5 +1,5 @@
 /*
-* Copyright 2008, 2009 Free Software Foundation, Inc.
+* Copyright 2008, 2009, 2012 Free Software Foundation, Inc.
 *
 * This software is distributed under the terms of the GNU Affero Public License.
 * See the COPYING file in the main directory for details.
@@ -58,13 +58,27 @@ RadioInterface::RadioInterface(RadioDevice *wRadio,
     samplesPerSymbol(wSPS), powerScaling(1.0),
     loadTest(false)
 {
+  int i;
+
   mClock.set(wStartTime);
+
+  for (i = 0; i < CHAN_M; i++) {
+    chanActive[i] = false;
+  }
 }
 
+RadioInterface::~RadioInterface(void)
+{
+  int i;
 
-RadioInterface::~RadioInterface(void) {
-  if (rcvBuffer!=NULL) delete rcvBuffer;
-  //mReceiveFIFO.clear();
+  close();
+
+  for (i = 0; i < CHAN_M; i++) {
+    if (rcvBuffer[i] != NULL)
+      delete rcvBuffer[i];
+    if (sendBuffer[i] != NULL)
+      delete sendBuffer[i];
+  }
 }
 
 double RadioInterface::fullScaleInputValue(void) {
@@ -111,15 +125,15 @@ int RadioInterface::radioifyVector(signalVector &wVector,
   return wVector.size();
 }
 
-int RadioInterface::unRadioifyVector(float *floatVector,
-				     signalVector& newVector)
+int RadioInterface::unRadioifyVector(float *floatVector, int offset,
+				     signalVector &newVector)
 {
   int i;
   signalVector::iterator itr = newVector.begin();
 
   for (i = 0; i < newVector.size(); i++) {
-    *itr++ = Complex<float>(floatVector[2 * i + 0],
-			    floatVector[2 * i + 1]);
+    *itr++ = Complex<float>(floatVector[offset + 2 * i + 0],
+			    floatVector[offset + 2 * i + 1]);
   }
 
   return newVector.size();
@@ -136,8 +150,13 @@ bool RadioInterface::tuneRx(double freq)
 }
 
 
-void RadioInterface::start()
+bool RadioInterface::start()
 {
+  int i;
+
+  if (mOn)
+    return false;
+
   LOG(INFO) << "starting radio interface...";
 #ifdef USRP1
   mAlignRadioServiceLoopThread.start((void * (*)(void*))AlignRadioServiceLoopAdapter,
@@ -150,11 +169,17 @@ void RadioInterface::start()
   mRadio->updateAlignment(writeTimestamp-10000); 
   mRadio->updateAlignment(writeTimestamp-10000);
 
-  sendBuffer = new float[2*2*INCHUNK*samplesPerSymbol];
-  rcvBuffer = new float[2*2*OUTCHUNK*samplesPerSymbol];
- 
+  for (i = 0; i < CHAN_M; i++) {
+    sendBuffer[i] = new float[8*2*INCHUNK];
+    rcvBuffer[i] = new float[8*2*OUTCHUNK];
+  }
+
+  /* Init I/O specific variables if applicable */ 
+  init();
+
   mOn = true;
 
+  return true;
 }
 
 #ifdef USRP1
@@ -173,22 +198,62 @@ void RadioInterface::alignRadio() {
 }
 #endif
 
-void RadioInterface::driveTransmitRadio(signalVector &radioBurst, bool zeroBurst) {
+void RadioInterface::driveTransmitRadio(signalVector **radioBurst, bool *zeroBurst)
+{
+  int i;
 
-  if (!mOn) return;
+  if (!mOn)
+    return;
 
-  radioifyVector(radioBurst, sendBuffer + 2 * sendCursor, powerScaling, zeroBurst);
+  for (i = 0; i < CHAN_M; i++) {
+    if (chanActive[i]) {
+      radioifyVector(*radioBurst[i], sendBuffer[i] + 2 * sendCursor,
+                     powerScaling, zeroBurst[i]);
+    }
+  }
 
-  sendCursor += radioBurst.size();
+  /* 
+   * All bursts should be the same size since all transceivers are
+   * tied with a single clock in the radio interface.
+   */
+  sendCursor += radioBurst[0]->size();
 
   pushBuffer();
 }
 
-void RadioInterface::driveReceiveRadio() {
+void shiftRxBuffers(float **buf, int offset, int len, bool *active)
+{
+  int i;
 
-  if (!mOn) return;
+  for (i = 0; i < CHAN_M; i++) {
+    if (active[i]) {
+      memmove(buf[i], buf[i] + offset, sizeof(float) * len);
+    }
+  }
+}
 
-  if (mReceiveFIFO.size() > 8) return;
+void RadioInterface::loadVectors(unsigned tN, int samplesPerBurst,
+                                 int idx, GSM::Time rxClock)
+{
+  int i;
+
+  for (i = 0; i < CHAN_M; i++) {
+    if (chanActive[i]) {
+      signalVector rxVector(samplesPerBurst);
+      unRadioifyVector(rcvBuffer[i], idx * 2, rxVector);
+      radioVector *rxBurst = new radioVector(rxVector, rxClock);
+      mReceiveFIFO[i].write(rxBurst);
+    }
+  }
+}
+
+void RadioInterface::driveReceiveRadio()
+{
+  if (!mOn)
+    return;
+
+  if (mReceiveFIFO[0].size() > 8)
+    return;
 
   pullBuffer();
 
@@ -198,40 +263,29 @@ void RadioInterface::driveReceiveRadio() {
   int rcvSz = rcvCursor;
   int readSz = 0;
   const int symbolsPerSlot = gSlotLen + 8;
+  int samplesPerBurst = (symbolsPerSlot + (tN % 4 == 0)) * samplesPerSymbol;
 
   // while there's enough data in receive buffer, form received 
   //    GSM bursts and pass up to Transceiver
   // Using the 157-156-156-156 symbols per timeslot format.
-  while (rcvSz > (symbolsPerSlot + (tN % 4 == 0))*samplesPerSymbol) {
-    signalVector rxVector((symbolsPerSlot + (tN % 4 == 0))*samplesPerSymbol);
-    unRadioifyVector(rcvBuffer+readSz*2,rxVector);
-    GSM::Time tmpTime = rcvClock;
+  while (rcvSz >= samplesPerBurst) { 
     if (rcvClock.FN() >= 0) {
-      //LOG(DEBUG) << "FN: " << rcvClock.FN();
-      radioVector *rxBurst = NULL;
-      if (!loadTest)
-        rxBurst = new radioVector(rxVector,tmpTime);
-      else {
-	if (tN % 4 == 0)
-	  rxBurst = new radioVector(*finalVec9,tmpTime);
-        else
-          rxBurst = new radioVector(*finalVec,tmpTime); 
-      }
-      mReceiveFIFO.put(rxBurst); 
+      loadVectors(tN, samplesPerBurst, readSz, rcvClock);
     }
-    mClock.incTN(); 
+
+    mClock.incTN();
     rcvClock.incTN();
-    //if (mReceiveFIFO.size() >= 16) mReceiveFIFO.wait(8);
-    //LOG(DEBUG) << "receiveFIFO: wrote radio vector at time: " << mClock.get() << ", new size: " << mReceiveFIFO.size() ;
-    readSz += (symbolsPerSlot+(tN % 4 == 0))*samplesPerSymbol;
-    rcvSz -= (symbolsPerSlot+(tN % 4 == 0))*samplesPerSymbol;
+
+    readSz += samplesPerBurst;
+    rcvSz -= samplesPerBurst;
 
     tN = rcvClock.TN();
+    samplesPerBurst = (symbolsPerSlot + (tN % 4 == 0)) * samplesPerSymbol;
   }
 
   if (readSz > 0) {
     rcvCursor -= readSz;
-    memmove(rcvBuffer,rcvBuffer+2*readSz,sizeof(float) * 2 * rcvCursor);
+    shiftRxBuffers(rcvBuffer, 2 * readSz, 2 * rcvCursor, chanActive);
   }
 }
 
