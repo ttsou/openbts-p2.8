@@ -116,8 +116,13 @@ int main(int argc, char *argv[])
     return EXIT_FAILURE;
   }
 
-  Transceiver *trx = new Transceiver(gConfig.getNum("TRX.Port"),gConfig.getStr("TRX.IP").c_str(),SAMPSPERSYM,GSM::Time(3,0),radio);
-  trx->receiveFIFO(radio->receiveFIFO());
+  int port = gConfig.getNum("TRX.Port");
+  const char *addr = gConfig.getStr("TRX.IP").c_str();
+  DriveLoop *drive = new DriveLoop(SAMPSPERSYM,GSM::Time(3,0),radio);
+  Transceiver *trx = new Transceiver(port, addr, SAMPSPERSYM, radio, drive, 0);
+  trx->receiveFIFO(radio->receiveFIFO(0));
+  trx->transmitQueue(drive->priorityQueue(0));
+  radio->activateChan(0);
 
 /*
   signalVector *gsmPulse = generateGSMPulse(2,1);
@@ -151,12 +156,12 @@ int main(int argc, char *argv[])
   usrp->loadBurst(finalVecShort,finalVec.size());
 */
   trx->start();
-  //int i = 0;
+
   while(!gbShutdown) { sleep(1); }//i++; if (i==60) break;}
 
   cout << "Shutting down transceiver..." << endl;
 
-//  trx->stop();
   delete trx;
-//  delete radio;
+  delete drive;
+  delete radio;
 }
