@@ -38,6 +38,8 @@ class RadioDevice {
 
   static RadioDevice *make(int sps, bool skipRx = false);
 
+  virtual ~RadioDevice() {};
+
   /** Initialize the USRP */
   virtual int open(const std::string &args)=0;
 
@@ -134,7 +136,6 @@ class RadioDevice {
   virtual double getSampleRate()=0;
   virtual double numberRead()=0;
   virtual double numberWritten()=0;
-
 };
 
 #endif
