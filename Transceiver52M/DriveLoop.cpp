@@ -209,11 +209,7 @@ DriveLoop::CorrType DriveLoop::expectedCorrType(int channel, GSM::Time currTime)
     break;
   }
 }
-   
-void DriveLoop::reset()
-{
-}
-  
+ 
 void DriveLoop::driveReceiveFIFO() 
 {
   SoftVector *rxBurst = NULL;

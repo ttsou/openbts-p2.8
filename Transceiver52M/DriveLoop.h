@@ -172,8 +172,6 @@ protected:
 
   friend void *RadioDriveLoopAdapter(DriveLoop *);
 
-  void reset();
-
   /** set priority on current thread */
   void setPriority() { mRadioInterface->setPriority(); }
 
