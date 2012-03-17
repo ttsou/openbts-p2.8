@@ -60,10 +60,9 @@ Transceiver::Transceiver(int wBasePort,
 	 mDriveLoop(wDriveLoop), mTransmitPriorityQueue(NULL),
 	 mChannel(wChannel), mTSC(-1)
 {
-  mFIFOServiceLoopThread = new Thread(32768);  ///< thread to push bursts into transmit FIFO
-  mControlServiceLoopThread = new Thread(32768);       ///< thread to process control messages from GSM core
-  mTransmitPriorityQueueServiceLoopThread = new Thread(32768);///< thread to process transmit bursts from GSM core
-
+  mFIFOServiceLoopThread = NULL;
+  mControlServiceLoopThread = NULL;
+  mTransmitPriorityQueueServiceLoopThread = NULL;
 
   mSamplesPerSymbol = wSamplesPerSymbol;
   mRadioInterface = wRadioInterface;
@@ -101,6 +100,10 @@ Transceiver::~Transceiver()
 {
   delete gsmPulse;
   mTransmitPriorityQueue->clear();
+
+  delete mFIFOServiceLoopThread;
+  delete mControlServiceLoopThread;
+  delete mTransmitPriorityQueueServiceLoopThread;
 }
   
 
@@ -304,6 +307,7 @@ void Transceiver::pullFIFO()
 
 void Transceiver::start()
 {
+  mControlServiceLoopThread = new Thread(32768);
   mControlServiceLoopThread->start((void * (*)(void*))ControlServiceLoopAdapter,(void*) this);
 }
 
@@ -362,11 +366,13 @@ void Transceiver::driveControl()
         generateRACHSequence(*gsmPulse,mSamplesPerSymbol);
 
         // Start radio interface threads.
+        mOn = true;
+        mFIFOServiceLoopThread = new Thread(32768);
+        mTransmitPriorityQueueServiceLoopThread = new Thread(32768);
+
         mFIFOServiceLoopThread->start((void * (*)(void*))FIFOServiceLoopAdapter,(void*) this);
         mTransmitPriorityQueueServiceLoopThread->start((void * (*)(void*))TransmitPriorityQueueServiceLoopAdapter,(void*) this);
         writeClockInterface();
-
-        mOn = true;
       }
     }
   }

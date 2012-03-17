@@ -29,8 +29,7 @@ DriveLoop::DriveLoop(int wSamplesPerSymbol,
                      GSM::Time wTransmitLatency,
                      RadioInterface *wRadioInterface)
 {
-  mRadioDriveLoopThread = new Thread(32768);
-
+  mRadioDriveLoopThread = NULL;
   mSamplesPerSymbol = wSamplesPerSymbol;
   mRadioInterface = wRadioInterface;
 
@@ -70,6 +69,9 @@ DriveLoop::DriveLoop(int wSamplesPerSymbol,
 
 DriveLoop::~DriveLoop()
 {
+  if (mRadioDriveLoopThread)
+    delete mRadioDriveLoopThread;
+
   delete gsmPulse;
   sigProcLibDestroy();
 }
@@ -77,6 +79,7 @@ DriveLoop::~DriveLoop()
 void DriveLoop::start()
 {
   mOn = true;
+  mRadioDriveLoopThread = new Thread(32768);
   mRadioDriveLoopThread->start((void * (*)(void*))RadioDriveLoopAdapter, (void*) this);
 }
 

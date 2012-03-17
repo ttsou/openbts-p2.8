@@ -36,7 +36,7 @@ class RadioInterface {
 
 protected:
 
-  Thread mAlignRadioServiceLoopThread;	      ///< thread that synchronizes transmit and receive sections
+  Thread *mAlignRadioServiceLoopThread;	      ///< thread that synchronizes transmit and receive sections
 
   VectorFIFO mReceiveFIFO[CHAN_M];	      ///< FIFO that holds receive  bursts
 

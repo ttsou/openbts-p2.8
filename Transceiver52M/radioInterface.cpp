@@ -75,6 +75,8 @@ RadioInterface::~RadioInterface(void)
     mRadio->stop();
     close();
  
+    delete mAlignRadioServiceLoopThread;
+
     for (i = 0; i < CHAN_M; i++) {
       if (rcvBuffer[i] != NULL)
         delete rcvBuffer[i];
@@ -160,17 +162,15 @@ bool RadioInterface::start()
   if (mOn)
     return false;
 
-  LOG(INFO) << "starting radio interface...";
+  mOn = true;
 #ifdef USRP1
-  mAlignRadioServiceLoopThread.start((void * (*)(void*))AlignRadioServiceLoopAdapter,
-                                     (void*)this);
+  mAlignRadioServiceLoopThread = new Thread(32768);
+  mAlignRadioServiceLoopThread->start((void * (*)(void*))AlignRadioServiceLoopAdapter,
+                                      (void*)this);
 #endif
   writeTimestamp = mRadio->initialWriteTimestamp();
   readTimestamp = mRadio->initialReadTimestamp();
   mRadio->start();
-  LOG(DEBUG) << "Radio started";
-  mRadio->updateAlignment(writeTimestamp-10000); 
-  mRadio->updateAlignment(writeTimestamp-10000);
 
   for (i = 0; i < CHAN_M; i++) {
     sendBuffer[i] = new float[8*2*INCHUNK];
@@ -180,7 +180,10 @@ bool RadioInterface::start()
   /* Init I/O specific variables if applicable */ 
   init();
 
-  mOn = true;
+  mRadio->start(); 
+  LOG(DEBUG) << "Radio started";
+  mRadio->updateAlignment(writeTimestamp-10000); 
+  mRadio->updateAlignment(writeTimestamp-10000);
 
   return true;
 }
