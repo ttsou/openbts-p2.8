@@ -105,7 +105,15 @@ int main(int argc, char *argv[])
 		sleep(1);
 	}
 
-	LOG(NOTICE) << "Shutting down transceiver...";
+	LOG(NOTICE) << "Shutting down transceivers...";
+	trx0->shutdown();
+	trx1->shutdown();
+	trx2->shutdown();
+
+	/*
+	 * Allow time for threads to end before we start freeing objects
+	 */
+	sleep(2);
 
 	delete trx0;
 	delete trx1;

@@ -95,6 +95,7 @@ private:
   int mSamplesPerSymbol;               ///< number of samples per GSM symbol
 
   bool mOn;			       ///< flag to indicate that transceiver is powered on
+  bool mRunning;                       ///< flag to indicate control loop is running
   double mTxFreq;                      ///< the transmit frequency
   double mRxFreq;                      ///< the receive frequency
   int mPower;                          ///< the transmit power in dB
@@ -134,6 +135,9 @@ public:
   /** start the Transceiver */
   void start();
 
+  /** shutdown (teardown threads) the Transceiver */
+  void shutdown();
+
   /** attach the radioInterface receive FIFO */
   void receiveFIFO(VectorFIFO *wFIFO) { mReceiveFIFO = wFIFO;}
 
@@ -164,6 +168,12 @@ protected:
   friend void *TransmitPriorityQueueServiceLoopAdapter(Transceiver *);
 
   void reset();
+
+  /** return transceiver on/off status */ 
+  bool on() { return mOn; }
+
+  /** return control loop operational status */ 
+  bool running() { return mRunning; }
 
   /** set priority on current thread */
   void setPriority() { mRadioInterface->setPriority(); }

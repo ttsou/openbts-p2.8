@@ -172,6 +172,11 @@ protected:
 
   friend void *RadioDriveLoopAdapter(DriveLoop *);
 
+  void reset();
+
+  /** return drive loop status */
+  bool on() { return mOn; }
+
   /** set priority on current thread */
   void setPriority() { mRadioInterface->setPriority(); }
 

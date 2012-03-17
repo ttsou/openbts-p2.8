@@ -69,8 +69,12 @@ DriveLoop::DriveLoop(int wSamplesPerSymbol,
 
 DriveLoop::~DriveLoop()
 {
-  if (mRadioDriveLoopThread)
-    delete mRadioDriveLoopThread;
+  if (mOn) {
+    mOn = false;
+
+    if (mRadioDriveLoopThread)
+      delete mRadioDriveLoopThread;
+  }
 
   delete gsmPulse;
   sigProcLibDestroy();
@@ -78,6 +82,9 @@ DriveLoop::~DriveLoop()
 
 void DriveLoop::start()
 {
+  if (mOn)
+    return;
+
   mOn = true;
   mRadioDriveLoopThread = new Thread(32768);
   mRadioDriveLoopThread->start((void * (*)(void*))RadioDriveLoopAdapter, (void*) this);
@@ -236,9 +243,6 @@ void DriveLoop::driveTransmitFIFO()
 {
   int i;
 
-  if (!mOn)
-    return;
-
   RadioClock *radioClock = (mRadioInterface->getClock());
   while (radioClock->get() + mTransmitLatency > mTransmitDeadlineClock) {
     pushRadioVector(mTransmitDeadlineClock);
@@ -250,14 +254,15 @@ void DriveLoop::driveTransmitFIFO()
   //else radioClock->wait();
 }
 
-void *RadioDriveLoopAdapter(DriveLoop *transceiver)
+void *RadioDriveLoopAdapter(DriveLoop *drive)
 {
-  transceiver->setPriority();
+  drive->setPriority();
 
-  while (1) {
-    transceiver->driveReceiveFIFO();
-    transceiver->driveTransmitFIFO();
+  while (drive->on()) {
+    drive->driveReceiveFIFO();
+    drive->driveTransmitFIFO();
     pthread_testcancel();
   }
+
   return NULL;
 }

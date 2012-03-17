@@ -188,10 +188,19 @@ bool RadioInterface::start()
   return true;
 }
 
+bool RadioInterface::stop()
+{
+  if (!mOn)
+    return false;
+
+  mOn = false;
+  mRadio->stop();
+}
+
 #ifdef USRP1
 void *AlignRadioServiceLoopAdapter(RadioInterface *radioInterface)
 {
-  while (1) {
+  while (radioInterface->on()) {
     radioInterface->alignRadio();
     pthread_testcancel();
   }
