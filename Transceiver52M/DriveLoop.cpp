@@ -33,12 +33,13 @@ DriveLoop::DriveLoop(int wSamplesPerSymbol,
   mSamplesPerSymbol = wSamplesPerSymbol;
   mRadioInterface = wRadioInterface;
 
-  GSM::Time startTime(random() % gHyperframe, 0);
-  mTransmitDeadlineClock = startTime;
-  mLatencyUpdateTime = startTime;
+  mStartTime = (random() % gHyperframe, 0);
+
+  mTransmitDeadlineClock = mStartTime;
+  mLatencyUpdateTime = mStartTime;
   mTransmitLatency = wTransmitLatency;
 
-  mRadioInterface->getClock()->set(startTime);
+  mRadioInterface->getClock()->set(mStartTime);
 
   // generate pulse and setup up signal processing library
   gsmPulse = generateGSMPulse(2, mSamplesPerSymbol);

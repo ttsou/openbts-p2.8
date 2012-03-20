@@ -58,6 +58,7 @@ private:
   Thread *mRadioDriveLoopThread;  ///< thread to push/pull bursts into transmit/receive FIFO
 
   GSM::Time mTransmitDeadlineClock;       ///< deadline for pushing bursts into transmit FIFO 
+  GSM::Time mStartTime;                   ///< random start time of the radio clock
 
   RadioInterface *mRadioInterface;	  ///< associated radioInterface object
   double txFullScale;                     ///< full scale input to radio
@@ -148,6 +149,8 @@ public:
   {
     mChanType[m][timeslot] = comb;
   }
+
+  GSM::Time getStartTime() { return mStartTime; }
 
 private:
 
