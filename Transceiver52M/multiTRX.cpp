@@ -55,14 +55,61 @@ static int setupSignals()
 	return 0;
 }
 
+/*
+ * Generate the channel-transceiver ordering. Channel 0 is always centered
+ * at the RF tuning frequecy. Fill remaining channels alternating left and
+ * right moving out from the center channel.
+ */
+static void genChanMap(int *chans)
+{
+	int i, n;
+
+	chans[0] = 0; 
+
+	for (i = 1, n = 1; i < CHAN_M; i++) {
+		if (i % 2) {
+			chans[i] = n;
+		} else {
+			chans[i] = CHAN_M - n;
+			n++;
+		}
+	}
+}
+
+static void createTrx(Transceiver **trx, int *map, int num,
+		      RadioInterface *radio, DriveLoop *drive)
+{
+	int i;
+
+	for (i = 0; i < num; i++) {
+		LOG(NOTICE) << "Creating TRX" << i
+			    << " attached on channel " << map[i];
+
+		radio->activateChan(map[i]);
+		trx[i] = new Transceiver(5700 + i * 1000, "127.0.0.1",
+					 SAMPSPERSYM, radio, drive, map[i]);
+		trx[i]->start();
+	}
+}
+
 int main(int argc, char *argv[])
 {
+	int i, numARFCN = 1;
+	int chanMap[CHAN_M];
 	RadioDevice *usrp;
 	RadioInterface* radio;
 	DriveLoop *drive;
-	Transceiver *trx0, *trx1, *trx2;
+	Transceiver *trx[CHAN_M];
 
 	gLogInit("transceiver", gConfig.getStr("Log.Level").c_str(), LOG_LOCAL7);
+
+	if (argc > 1) {
+		numARFCN = atoi(argv[1]);
+		if (numARFCN > CHAN_M) {
+			LOG(ALERT) << numARFCN << " channels not supported with current build";
+			exit(-1);
+		}
+	}
 
 	if (setupSignals() < 0) {
 		LOG(ERR) << "Failed to setup signal handlers, exiting...";
@@ -70,6 +117,7 @@ int main(int argc, char *argv[])
 	}
 
 	srandom(time(NULL));
+	genChanMap(chanMap);
 
 	usrp = RadioDevice::make(DEVICERATE);
 	if (!usrp->open()) {
@@ -77,41 +125,30 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	radio = new RadioInterface(usrp, 3, SAMPSPERSYM, 0, false);
+	radio = new RadioInterface(usrp, numARFCN, SAMPSPERSYM, 0, false);
 	drive = new DriveLoop(SAMPSPERSYM, GSM::Time(3,0), radio);
 
-	LOG(NOTICE) << "Creating TRX0";
-	trx0 = new Transceiver(5700, "127.0.0.1", SAMPSPERSYM, radio, drive, 0);
-	radio->activateChan(0);
-	trx0->start();
-
-	LOG(NOTICE) << "Creating TRX1";
-	trx1 = new Transceiver(6700, "127.0.0.1", SAMPSPERSYM, radio, drive, 1);
-	radio->activateChan(1);
-	trx1->start();
-
-	LOG(NOTICE) << "Creating TRX2";
-	trx2 = new Transceiver(7700, "127.0.0.1", SAMPSPERSYM, radio, drive, 4);
-	radio->activateChan(4);
-	trx2->start();
+	/* Create, attach, and activate all transceivers */
+	createTrx(trx, chanMap, numARFCN, radio, drive);
 
 	while (!gbShutdown) { 
 		sleep(1);
 	}
 
 	LOG(NOTICE) << "Shutting down transceivers...";
-	trx0->shutdown();
-	trx1->shutdown();
-	trx2->shutdown();
+	for (i = 0; i < numARFCN; i++) {
+		trx[i]->shutdown();
+	}
 
 	/*
 	 * Allow time for threads to end before we start freeing objects
 	 */
 	sleep(2);
 
-	delete trx0;
-	delete trx1;
-	delete trx2;
+	for (i = 0; i < numARFCN; i++) {
+		delete trx[i];
+	}
+
 	delete drive;
 	delete radio;
 	delete usrp;
