@@ -82,22 +82,16 @@ int main(int argc, char *argv[])
 
 	LOG(NOTICE) << "Creating TRX0";
 	trx0 = new Transceiver(5700, "127.0.0.1", SAMPSPERSYM, radio, drive, 0);
-	trx0->receiveFIFO(radio->receiveFIFO(0));
-	trx0->transmitQueue(drive->priorityQueue(0));
 	radio->activateChan(0);
 	trx0->start();
 
 	LOG(NOTICE) << "Creating TRX1";
 	trx1 = new Transceiver(6700, "127.0.0.1", SAMPSPERSYM, radio, drive, 1);
-	trx1->receiveFIFO(radio->receiveFIFO(1));
-	trx1->transmitQueue(drive->priorityQueue(1));
 	radio->activateChan(1);
 	trx1->start();
 
 	LOG(NOTICE) << "Creating TRX2";
 	trx2 = new Transceiver(7700, "127.0.0.1", SAMPSPERSYM, radio, drive, 4);
-	trx2->receiveFIFO(radio->receiveFIFO(4));
-	trx2->transmitQueue(drive->priorityQueue(4));
 	radio->activateChan(4);
 	trx2->start();
 

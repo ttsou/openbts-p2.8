@@ -138,12 +138,6 @@ public:
   /** shutdown (teardown threads) the Transceiver */
   void shutdown();
 
-  /** attach the radioInterface receive FIFO */
-  void receiveFIFO(VectorFIFO *wFIFO) { mReceiveFIFO = wFIFO;}
-
-  /** attach the radioInterface transmit FIFO */
-  void transmitQueue(VectorQueue *wQ) { mTransmitPriorityQueue = wQ; }
-
 protected:
 
   /** drive reception and demodulation of GSM bursts */ 

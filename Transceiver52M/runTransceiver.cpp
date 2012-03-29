@@ -120,8 +120,6 @@ int main(int argc, char *argv[])
   const char *addr = gConfig.getStr("TRX.IP").c_str();
   DriveLoop *drive = new DriveLoop(SAMPSPERSYM,GSM::Time(3,0),radio);
   Transceiver *trx = new Transceiver(port, addr, SAMPSPERSYM, radio, drive, 0);
-  trx->receiveFIFO(radio->receiveFIFO(0));
-  trx->transmitQueue(drive->priorityQueue(0));
   radio->activateChan(0);
 
 /*

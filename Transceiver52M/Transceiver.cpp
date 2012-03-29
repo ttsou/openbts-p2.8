@@ -75,6 +75,9 @@ Transceiver::Transceiver(int wBasePort,
   gsmPulse = generateGSMPulse(2,mSamplesPerSymbol);
   LOG(DEBUG) << "gsmPulse: " << *gsmPulse;
 
+  mTransmitPriorityQueue = mDriveLoop->priorityQueue(mChannel);
+  mReceiveFIFO = mRadioInterface->receiveFIFO(mChannel);
+
   txFullScale = mRadioInterface->fullScaleInputValue();
   rxFullScale = mRadioInterface->fullScaleOutputValue();
 
