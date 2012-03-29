@@ -265,6 +265,7 @@ public:
 	    @return true if message received or false on timeout or error
 	*/
 	bool recv_async_msg();
+	bool running() { return started; }
 
 	enum err_code {
 		ERROR_TIMING = -1,
@@ -310,12 +311,12 @@ private:
 	std::string str_code(uhd::rx_metadata_t metadata);
 	std::string str_code(uhd::async_metadata_t metadata);
 
-	Thread async_event_thrd;
+	Thread *async_event_thrd;
 };
 
 void *async_event_loop(uhd_device *dev)
 {
-	while (1) {
+	while (dev->running()) {
 		dev->recv_async_msg();
 		pthread_testcancel();
 	}
@@ -349,6 +350,7 @@ uhd_device::uhd_device(int sps, bool skip_rx)
 	  tx_freq(0.0), rx_freq(0.0), tx_spp(0), rx_spp(0),
 	  started(false), aligned(false), rx_pkt_cnt(0), drop_cnt(0),
 	  prev_ts(0,0), ts_offset(0), rx_smpl_buf(NULL)
+	  async_event_thrd(NULL)
 {
 	this->sps = sps;
 	this->skip_rx = skip_rx;
@@ -677,10 +679,12 @@ bool uhd_device::start()
 		return false;
 	}
 
+	started = true;
 	setPriority();
 
 	// Start asynchronous event (underrun check) loop
-	async_event_thrd.start((void * (*)(void*))async_event_loop, (void*)this);
+	async_event_thrd = new Thread(32768);
+	async_event_thrd->start((void * (*)(void*))async_event_loop, (void*)this);
 
 	// Start streaming
 	restart(uhd::time_spec_t(0.0));
@@ -689,18 +693,23 @@ bool uhd_device::start()
 	double time_now = usrp_dev->get_time_now().get_real_secs();
 	LOG(INFO) << "The current time is " << time_now << " seconds";
 
-	started = true;
 	return true;
 }
 
 bool uhd_device::stop()
 {
+	if (!started)
+		return false;
+
+	started = false;
+
 	uhd::stream_cmd_t stream_cmd = 
 		uhd::stream_cmd_t::STREAM_MODE_STOP_CONTINUOUS;
 
 	usrp_dev->issue_stream_cmd(stream_cmd);
 
-	started = false;
+	delete async_event_thrd;
+
 	return true;
 }
 
