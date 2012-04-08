@@ -1041,7 +1041,7 @@ ssize_t smpl_buf::read(void *buf, size_t len, TIMESTAMP timestamp)
 		num_smpls = len;
 
 	// Starting index
-	size_t read_start = data_start + (timestamp - time_start) % buf_len;
+	size_t read_start = (data_start + (timestamp - time_start)) % buf_len;
 
 	// Read it
 	if (read_start + num_smpls < buf_len) {
