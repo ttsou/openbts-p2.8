@@ -50,10 +50,11 @@ private:
 
   GSM::Time mTransmitLatency;     ///< latency between basestation clock and transmit deadline clock
   GSM::Time mLatencyUpdateTime;   ///< last time latency was updated
+  GSM::Time mLastClockUpdateTime; ///< last time clock update was sent up to core
 
   UDPSocket mClockSocket;	  ///< socket for writing clock updates to GSM core
 
-  VectorQueue  mTransmitPriorityQueue[CHAN_M];   ///< priority queue of transmit bursts received from GSM core
+  VectorQueue  mTransmitPriorityQueue[CHAN_MAX];   ///< priority queue of transmit bursts received from GSM core
 
   Thread *mRadioDriveLoopThread;  ///< thread to push/pull bursts into transmit/receive FIFO
 
@@ -64,6 +65,8 @@ private:
   double txFullScale;                     ///< full scale input to radio
   double rxFullScale;                     ///< full scale output to radio
 
+  /** Number of channels supported by the channelizer */
+  int mChanM;
 
   /** unmodulate a modulated burst */
 #ifdef TRANSMIT_LOGGING
@@ -79,20 +82,20 @@ private:
   /** Pull and demodulate a burst from the receive FIFO */ 
   SoftVector *pullRadioVector(GSM::Time &wTime, int &RSSI, int &timingOffset);
    
-  /** send messages over the clock socket */
-  void writeClockInterface(void);
-
   signalVector *gsmPulse;              ///< the GSM shaping pulse for modulation
 
   int mSamplesPerSymbol;               ///< number of samples per GSM symbol
 
   bool mOn;			       ///< flag to indicate that transceiver is powered on
-  int fillerModulus[CHAN_M][8];                ///< modulus values of all timeslots, in frames
-  signalVector *fillerTable[CHAN_M][102][8];   ///< table of modulated filler waveforms for all timeslots
+  int fillerModulus[CHAN_MAX][8];                ///< modulus values of all timeslots, in frames
+  signalVector *fillerTable[CHAN_MAX][102][8];   ///< table of modulated filler waveforms for all timeslots
 
-  signalVector *mTxBursts[CHAN_M];
-  bool         mIsFiller[CHAN_M];
-  bool         mIsZero[CHAN_M];
+  /** Channelizer path for primary ARFCN */
+  int mC0;
+
+  signalVector *mTxBursts[CHAN_MAX];
+  bool         mIsFiller[CHAN_MAX];
+  bool         mIsZero[CHAN_MAX];
 
 public:
 
@@ -103,7 +106,8 @@ public:
       @param wTransmitLatency initial setting of transmit latency
       @param radioInterface associated radioInterface object
   */
-  DriveLoop(int wSamplesPerSymbol,
+  DriveLoop(int wBasePort, const char *TRXAddress,
+	    int wChanM, int wC0, int wSamplesPerSymbol,
 	    GSM::Time wTransmitLatency,
 	    RadioInterface *wRadioInterface);
    
@@ -114,8 +118,6 @@ public:
   void start();
 
   VectorQueue *priorityQueue(int m) { return &mTransmitPriorityQueue[m]; }
-
-  GSM::Time *deadlineClock() { return &mTransmitDeadlineClock; }
 
   /** Codes for burst types of received bursts*/
   typedef enum {
@@ -151,10 +153,15 @@ public:
   }
 
   GSM::Time getStartTime() { return mStartTime; }
+  GSM::Time getLastClockUpdate() { return mLastClockUpdateTime; }
+  GSM::Time getDeadlineClock() { return mTransmitDeadlineClock; }
+
+  /** send messages over the clock socket */
+  void writeClockInterface(void);
 
 private:
 
-  ChannelCombination mChanType[CHAN_M][8];     ///< channel types for all timeslots
+  ChannelCombination mChanType[CHAN_MAX][8];     ///< channel types for all timeslots
 
 protected:
 

@@ -25,10 +25,13 @@
 #include "DriveLoop.h"
 #include <Logger.h>
 
-DriveLoop::DriveLoop(int wSamplesPerSymbol,
+DriveLoop::DriveLoop(int wBasePort, const char *TRXAddress,
+		     int wChanM, int wC0, int wSamplesPerSymbol,
                      GSM::Time wTransmitLatency,
                      RadioInterface *wRadioInterface)
+	:mClockSocket(wBasePort, TRXAddress, wBasePort + 100), mC0(wC0)
 {
+  mChanM = wChanM;
   mRadioDriveLoopThread = NULL;
   mSamplesPerSymbol = wSamplesPerSymbol;
   mRadioInterface = wRadioInterface;
@@ -38,6 +41,7 @@ DriveLoop::DriveLoop(int wSamplesPerSymbol,
   mTransmitDeadlineClock = mStartTime;
   mLatencyUpdateTime = mStartTime;
   mTransmitLatency = wTransmitLatency;
+  mLastClockUpdateTime = mStartTime;
 
   mRadioInterface->getClock()->set(mStartTime);
 
@@ -48,18 +52,22 @@ DriveLoop::DriveLoop(int wSamplesPerSymbol,
 
   txFullScale = mRadioInterface->fullScaleInputValue();
 
-  // initialize filler tables with dummy bursts, initialize other per-timeslot variables
+  // initialize filler tables with dummy bursts on C0, empty bursts otherwise
   for (int i = 0; i < 8; i++) {
     signalVector* modBurst = modulateBurst(gDummyBurst, *gsmPulse,
                                            8 + (i % 4 == 0), mSamplesPerSymbol);
     scaleVector(*modBurst, txFullScale);
     for (int j = 0; j < 102; j++) {
-      for (int n = 0; n < CHAN_M; n++)
-        fillerTable[n][j][i] = new signalVector(*modBurst);
+      for (int n = 0; n < mChanM; n++) {
+        if (n == mC0)
+          fillerTable[n][j][i] = new signalVector(*modBurst);
+        else
+          fillerTable[n][j][i] = new signalVector(modBurst->size());
+      }
     }
     delete modBurst;
 
-    for (int n = 0; n < CHAN_M; n++) {
+    for (int n = 0; n < mChanM; n++) {
       fillerModulus[n][i] = 26;
       mChanType[n][i] = NONE;
     }
@@ -97,17 +105,19 @@ void DriveLoop::pushRadioVector(GSM::Time &nowTime)
   radioVector *staleBurst;
   radioVector *next;
 
-  for (i = 0; i < CHAN_M; i++) {
+  for (i = 0; i < mChanM; i++) {
     // dump stale bursts, if any
     while (staleBurst = mTransmitPriorityQueue[i].getStaleBurst(nowTime)) {
       // Even if the burst is stale, put it in the fillter table.
       // (It might be an idle pattern.)
       LOG(NOTICE) << "dumping STALE burst in TRX->USRP interface";
-      const GSM::Time& nextTime = staleBurst->getTime();
-      int TN = nextTime.TN();
-      int modFN = nextTime.FN() % fillerModulus[i][TN];
-      delete fillerTable[i][modFN][TN];
-      fillerTable[i][modFN][TN] = staleBurst;
+      if (i == mC0) {
+        const GSM::Time& nextTime = staleBurst->getTime();
+        int TN = nextTime.TN();
+        int modFN = nextTime.FN() % fillerModulus[i][TN];
+        delete fillerTable[i][modFN][TN];
+        fillerTable[i][modFN][TN] = staleBurst;
+      }
     }
 
     int TN = nowTime.TN();
@@ -120,16 +130,18 @@ void DriveLoop::pushRadioVector(GSM::Time &nowTime)
     // if queue contains data at the desired timestamp, stick it into FIFO
     if (next = (radioVector*) mTransmitPriorityQueue[i].getCurrentBurst(nowTime)) {
       LOG(DEBUG) << "transmitFIFO: wrote burst " << next << " at time: " << nowTime;
-      delete fillerTable[i][modFN][TN];
-      fillerTable[i][modFN][TN] = new signalVector(*(next));
+      if (i == mC0) {
+        delete fillerTable[i][modFN][TN];
+        fillerTable[i][modFN][TN] = new signalVector(*(next));
+        mIsFiller[i] = false;
+      } 
       mTxBursts[i] = next;
-      mIsFiller[i] = false;
     }
   }
 
   mRadioInterface->driveTransmitRadio(mTxBursts, mIsZero);
 
-  for (i = 0; i < CHAN_M; i++) {
+  for (i = 0; i < mChanM; i++) {
     if (!mIsFiller[i])
       delete mTxBursts[i];
   }
@@ -253,6 +265,20 @@ void DriveLoop::driveTransmitFIFO()
   // FIXME -- This should not be a hard spin.
   // But any delay here causes us to throw omni_thread_fatal.
   //else radioClock->wait();
+}
+
+void DriveLoop::writeClockInterface()
+{
+  char command[50];
+  // FIXME -- This should be adaptive.
+  sprintf(command,"IND CLOCK %llu",
+          (unsigned long long) (mTransmitDeadlineClock.FN() + 2));
+
+  LOG(INFO) << "ClockInterface: sending " << command;
+
+  mClockSocket.write(command,strlen(command)+1);
+
+  mLastClockUpdateTime = mTransmitDeadlineClock;
 }
 
 void *RadioDriveLoopAdapter(DriveLoop *drive)

@@ -32,6 +32,8 @@ ConfigurationTable gConfig("/etc/OpenBTS/OpenBTS.db");
 
 volatile bool gbShutdown = false;
 
+int Transceiver::mTSC = 0;
+
 static void sigHandler(int signum)
 {
 	LOG(NOTICE) << "Received shutdown signal";
@@ -56,23 +58,23 @@ static int setupSignals()
 }
 
 /*
- * Generate the channel-transceiver ordering. Channel 0 is always centered
- * at the RF tuning frequecy. Fill remaining channels alternating left and
- * right moving out from the center channel.
+ * Generate the channel-transceiver ordering. Attempt to match the RAD1
+ * ordering where the active channels are centered in the overall device
+ * bandwidth. C0 is always has the lowest ARFCN with increasing subsequent
+ * channels. When an even number of channels is selected, the carriers will
+ * be offset from the RF center by -200 kHz, or half ARFCN spacing.
  */
-static void genChanMap(int *chans)
+static void genChanMap(int numARFCN, int chanM, int *chans)
 {
 	int i, n;
 
-	chans[0] = 0; 
+	chans[0] = numARFCN / 2; 
 
-	for (i = 1, n = 1; i < CHAN_M; i++) {
-		if (i % 2) {
-			chans[i] = n;
-		} else {
-			chans[i] = CHAN_M - n;
-			n++;
-		}
+	for (i = 1, n = 1; i < numARFCN; i++) {
+		if (!chans[i - 1])
+			chans[i] = chanM - 1;
+		else
+			chans[i] = chans[i - 1] - 1;
 	}
 }
 
@@ -80,44 +82,66 @@ static void createTrx(Transceiver **trx, int *map, int num,
 		      RadioInterface *radio, DriveLoop *drive)
 {
 	int i;
+	bool primary = true;
 
 	for (i = 0; i < num; i++) {
 		LOG(NOTICE) << "Creating TRX" << i
 			    << " attached on channel " << map[i];
 
 		radio->activateChan(map[i]);
-		trx[i] = new Transceiver(5700 + i * 1000, "127.0.0.1",
-					 SAMPSPERSYM, radio, drive, map[i]);
+		trx[i] = new Transceiver(5700 + 2 * i, "127.0.0.1",
+					 SAMPSPERSYM, radio, drive,
+					 map[i], primary);
 		trx[i]->start();
+		primary = false;
 	}
 }
 
 int main(int argc, char *argv[])
 {
-	int i, numARFCN = 1;
-	int chanMap[CHAN_M];
+	int i, chanM, numARFCN = 1;
+	int chanMap[CHAN_MAX];
 	RadioDevice *usrp;
 	RadioInterface* radio;
 	DriveLoop *drive;
-	Transceiver *trx[CHAN_M];
+	Transceiver *trx[CHAN_MAX];
 
 	gLogInit("transceiver", gConfig.getStr("Log.Level").c_str(), LOG_LOCAL7);
 
 	if (argc > 1) {
 		numARFCN = atoi(argv[1]);
-		if (numARFCN > CHAN_M) {
+		if (numARFCN > (CHAN_MAX - 1)) {
 			LOG(ALERT) << numARFCN << " channels not supported with current build";
 			exit(-1);
 		}
 	}
+
+	srandom(time(NULL));
 
 	if (setupSignals() < 0) {
 		LOG(ERR) << "Failed to setup signal handlers, exiting...";
 		exit(-1);
 	}
 
-	srandom(time(NULL));
-	genChanMap(chanMap);
+	/*
+	 * Select the number of channels according to the number of ARFCNs's
+	 * and generate ARFCN-to-channelizer path mappings. The channelizer
+	 * aliases and extracts 'M' equally spaced channels to baseband. The
+	 * number of ARFCN's must be less than the number of channels in the
+	 * channelizer.
+	 */
+	switch (numARFCN) {
+	case 1:
+		chanM = 1;
+		break;
+	case 2:
+	case 3:
+		chanM = 5;
+		break;
+	default:
+		chanM = 10;
+	}
+	genChanMap(numARFCN, chanM, chanMap);
 
 	usrp = RadioDevice::make(DEVICERATE);
 	if (!usrp->open()) {
@@ -125,8 +149,9 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	radio = new RadioInterface(usrp, numARFCN, SAMPSPERSYM, 0, false);
-	drive = new DriveLoop(SAMPSPERSYM, GSM::Time(3,0), radio);
+	radio = new RadioInterface(usrp, chanM, 3, SAMPSPERSYM, 0, false);
+	drive = new DriveLoop(5700, "127.0.0.1", chanM, chanMap[0],
+			      SAMPSPERSYM, GSM::Time(3,0), radio);
 
 	/* Create, attach, and activate all transceivers */
 	createTrx(trx, chanMap, numARFCN, radio, drive);

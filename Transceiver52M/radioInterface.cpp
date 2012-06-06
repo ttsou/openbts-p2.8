@@ -50,10 +50,11 @@ static void shortToFloat(float *out, short *in, int num)
 }
 
 RadioInterface::RadioInterface(RadioDevice *wRadio,
+			       int wChanM,
 			       int wReceiveOffset,
 			       int wSPS,
 			       GSM::Time wStartTime)
-  : underrun(false), sendCursor(0), rcvCursor(0), mOn(false),
+  : mChanM(wChanM), underrun(false), sendCursor(0), rcvCursor(0), mOn(false),
     mRadio(wRadio), receiveOffset(wReceiveOffset),
     samplesPerSymbol(wSPS), powerScaling(1.0),
     loadTest(false)
@@ -62,7 +63,7 @@ RadioInterface::RadioInterface(RadioDevice *wRadio,
 
   mClock.set(wStartTime);
 
-  for (i = 0; i < CHAN_M; i++) {
+  for (i = 0; i < mChanM; i++) {
     chanActive[i] = false;
   }
 }
@@ -77,7 +78,7 @@ RadioInterface::~RadioInterface(void)
  
     delete mAlignRadioServiceLoopThread;
 
-    for (i = 0; i < CHAN_M; i++) {
+    for (i = 0; i < mChanM; i++) {
       if (rcvBuffer[i] != NULL)
         delete rcvBuffer[i];
       if (sendBuffer[i] != NULL)
@@ -170,9 +171,7 @@ bool RadioInterface::start()
 #endif
   writeTimestamp = mRadio->initialWriteTimestamp();
   readTimestamp = mRadio->initialReadTimestamp();
-  mRadio->start();
-
-  for (i = 0; i < CHAN_M; i++) {
+  for (i = 0; i < mChanM; i++) {
     sendBuffer[i] = new float[8*2*INCHUNK];
     rcvBuffer[i] = new float[8*2*OUTCHUNK];
   }
@@ -220,7 +219,7 @@ void RadioInterface::driveTransmitRadio(signalVector **radioBurst, bool *zeroBur
   if (!mOn)
     return;
 
-  for (i = 0; i < CHAN_M; i++) {
+  for (i = 0; i < mChanM; i++) {
     if (chanActive[i]) {
       radioifyVector(*radioBurst[i], sendBuffer[i] + 2 * sendCursor,
                      powerScaling, zeroBurst[i]);
@@ -236,11 +235,11 @@ void RadioInterface::driveTransmitRadio(signalVector **radioBurst, bool *zeroBur
   pushBuffer();
 }
 
-void shiftRxBuffers(float **buf, int offset, int len, bool *active)
+void shiftRxBuffers(float **buf, int offset, int len, int chanM, bool *active)
 {
   int i;
 
-  for (i = 0; i < CHAN_M; i++) {
+  for (i = 0; i < chanM; i++) {
     if (active[i]) {
       memmove(buf[i], buf[i] + offset, sizeof(float) * len);
     }
@@ -252,7 +251,7 @@ void RadioInterface::loadVectors(unsigned tN, int samplesPerBurst,
 {
   int i;
 
-  for (i = 0; i < CHAN_M; i++) {
+  for (i = 0; i < mChanM; i++) {
     if (chanActive[i]) {
       signalVector rxVector(samplesPerBurst);
       unRadioifyVector(rcvBuffer[i], idx * 2, rxVector);
@@ -300,7 +299,7 @@ void RadioInterface::driveReceiveRadio()
 
   if (readSz > 0) {
     rcvCursor -= readSz;
-    shiftRxBuffers(rcvBuffer, 2 * readSz, 2 * rcvCursor, chanActive);
+    shiftRxBuffers(rcvBuffer, 2 * readSz, 2 * rcvCursor, mChanM, chanActive);
   }
 }
 

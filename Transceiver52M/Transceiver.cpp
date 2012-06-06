@@ -53,12 +53,11 @@ Transceiver::Transceiver(int wBasePort,
 			 int wSamplesPerSymbol,
 			 RadioInterface *wRadioInterface,
 			 DriveLoop *wDriveLoop,
-			 int wChannel)
+			 int wChannel, bool wPrimary)
 	:mDataSocket(wBasePort+2,TRXAddress,wBasePort+102),
 	 mControlSocket(wBasePort+1,TRXAddress,wBasePort+101),
-	 mClockSocket(wBasePort,TRXAddress,wBasePort+100),
 	 mDriveLoop(wDriveLoop), mTransmitPriorityQueue(NULL),
-	 mChannel(wChannel), mTSC(-1)
+	 mChannel(wChannel), mPrimary(wPrimary), mTSC(-1)
 {
   mFIFOServiceLoopThread = NULL;
   mControlServiceLoopThread = NULL;
@@ -66,10 +65,7 @@ Transceiver::Transceiver(int wBasePort,
 
   mSamplesPerSymbol = wSamplesPerSymbol;
   mRadioInterface = wRadioInterface;
-  mLastClockUpdateTime = mDriveLoop->getStartTime();
   mMaxExpectedDelay = 0;
-
-  mTransmitDeadlineClock = wDriveLoop->deadlineClock();
 
   // generate pulse and setup up signal processing library
   gsmPulse = generateGSMPulse(2,mSamplesPerSymbol);
@@ -93,11 +89,15 @@ Transceiver::Transceiver(int wBasePort,
   mRunning = false;
   mTxFreq = 0.0;
   mRxFreq = 0.0;
+
+  if (mPrimary)
+    mFreqOffset = mChannel * CHAN_RATE;
+  else
+    mFreqOffset = 0.0;
+
   mPower = -10;
   mEnergyThreshold = INIT_ENERGY_THRSHD;
   prevFalseDetectionTime = mDriveLoop->getStartTime();
-
-  mRadioLocked = mRadioInterface->started();
 }
 
 Transceiver::~Transceiver()
@@ -172,6 +172,7 @@ SoftVector *Transceiver::pullRadioVector(GSM::Time &wTime,
   bool success = false;
   if (corrType == DriveLoop::TSC) {
     LOG(DEBUG) << "looking for TSC at time: " << rxBurst->getTime();
+
     signalVector *channelResp;
     double framesElapsed = rxBurst->getTime()-channelEstimateTime[timeslot];
     bool estimateChannel = false;
@@ -314,6 +315,15 @@ void Transceiver::start()
   mRunning = true;
   mControlServiceLoopThread = new Thread(32768);
   mControlServiceLoopThread->start((void * (*)(void*))ControlServiceLoopAdapter,(void*) this);
+
+  if (!mPrimary) {
+    mOn = true;
+    mFIFOServiceLoopThread = new Thread(32768);
+    mFIFOServiceLoopThread->start((void * (*)(void*))FIFOServiceLoopAdapter,(void*) this);
+ 
+    mTransmitPriorityQueueServiceLoopThread = new Thread(32768);
+    mTransmitPriorityQueueServiceLoopThread->start((void * (*)(void*))TransmitPriorityQueueServiceLoopAdapter,(void*) this);
+  }
 }
 
 void Transceiver::shutdown()
@@ -359,7 +369,7 @@ void Transceiver::driveControl()
 
   sscanf(buffer,"%3s %s",cmdcheck,command);
 
-  writeClockInterface();
+  mDriveLoop->writeClockInterface();
 
   if (strcmp(cmdcheck,"CMD")!=0) {
     LOG(WARNING) << "bogus message on control interface";
@@ -377,22 +387,22 @@ void Transceiver::driveControl()
       sprintf(response,"RSP POWERON 1");
     else {
       sprintf(response,"RSP POWERON 0");
-      if (!mOn) {
+      if (mPrimary && !mOn) {
         // Prepare for thread start
         mPower = -20;
-        if (mRadioInterface->start())
-          mDriveLoop->start();
+        mRadioInterface->start();
+        mDriveLoop->start();
 
+        mDriveLoop->writeClockInterface();
         generateRACHSequence(*gsmPulse,mSamplesPerSymbol);
 
         // Start radio interface threads.
         mOn = true;
         mFIFOServiceLoopThread = new Thread(32768);
-        mTransmitPriorityQueueServiceLoopThread = new Thread(32768);
-
         mFIFOServiceLoopThread->start((void * (*)(void*))FIFOServiceLoopAdapter,(void*) this);
+
+        mTransmitPriorityQueueServiceLoopThread = new Thread(32768);
         mTransmitPriorityQueueServiceLoopThread->start((void * (*)(void*))TransmitPriorityQueueServiceLoopAdapter,(void*) this);
-        writeClockInterface();
       }
     }
   }
@@ -409,7 +419,7 @@ void Transceiver::driveControl()
     sscanf(buffer,"%3s %s %d",cmdcheck,command,&newGain);
     newGain = mRadioInterface->setRxGain(newGain);
     mEnergyThreshold = INIT_ENERGY_THRSHD;
-    if (!mRadioLocked)
+    if (mPrimary)
       newGain = mRadioInterface->setRxGain(newGain);
     sprintf(response,"RSP SETRXGAIN 0 %d",newGain);
   }
@@ -430,7 +440,7 @@ void Transceiver::driveControl()
       sprintf(response,"RSP SETPOWER 1 %d",dbPwr);
     else {
       mPower = dbPwr;
-      if (!mRadioLocked)
+      if (mPrimary)
         mRadioInterface->setPowerAttenuation(dbPwr);
       sprintf(response,"RSP SETPOWER 0 %d",dbPwr);
     }
@@ -446,21 +456,14 @@ void Transceiver::driveControl()
       sprintf(response,"RSP ADJPOWER 0 %d",mPower);
     }
   }
-#define FREQOFFSET 0//11.2e3
   else if (strcmp(command,"RXTUNE")==0) {
     // tune receiver
     int freqKhz;
     sscanf(buffer,"%3s %s %d",cmdcheck,command,&freqKhz);
-    mRxFreq = freqKhz*1.0e3+FREQOFFSET;
-    mRadioLocked = mRadioInterface->started();
-
-    if (!mRadioLocked) {
-       if (!mRadioInterface->tuneRx(mRxFreq)) {
-         LOG(ALERT) << "RX failed to tune";
-         sprintf(response,"RSP RXTUNE 1 %d",freqKhz);
-      } else {
-       sprintf(response,"RSP RXTUNE 0 %d",freqKhz);
-      }
+    mRxFreq = freqKhz * 1.0e3 + mFreqOffset;
+    if (mPrimary && (!mRadioInterface->tuneRx(mRxFreq))) {
+      LOG(ALERT) << "RX failed to tune";
+      sprintf(response,"RSP RXTUNE 1 %d",freqKhz);
     } else {
       sprintf(response,"RSP RXTUNE 0 %d",freqKhz);
     }
@@ -470,17 +473,12 @@ void Transceiver::driveControl()
     int freqKhz;
     sscanf(buffer,"%3s %s %d",cmdcheck,command,&freqKhz);
     //freqKhz = 890e3;
-    mTxFreq = freqKhz*1.0e3+FREQOFFSET;
-    mRadioLocked = mRadioInterface->started();
-    if (!mRadioLocked) {
-       if (!mRadioInterface->tuneTx(mTxFreq)) {
-         LOG(ALERT) << "TX failed to tune";
-         sprintf(response,"RSP TXTUNE 1 %d",freqKhz);
-       } else {
-         sprintf(response,"RSP TXTUNE 0 %d",freqKhz);
-       }
+    mTxFreq = freqKhz * 1.0e3 + mFreqOffset;
+    if (mPrimary && (!mRadioInterface->tuneTx(mTxFreq))) {
+      LOG(ALERT) << "TX failed to tune";
+      sprintf(response,"RSP TXTUNE 1 %d",freqKhz);
     } else {
-        sprintf(response,"RSP TXTUNE 0 %d",freqKhz);
+      sprintf(response,"RSP TXTUNE 0 %d",freqKhz);
     }
   }
   else if (strcmp(command,"SETTSC")==0) {
@@ -547,28 +545,12 @@ bool Transceiver::driveTransmitPriorityQueue()
   for (int i = 0; i < 4; i++)
     frameNum = (frameNum << 8) | (0x0ff & buffer[i+1]);
   
-  /*
-  if (GSM::Time(frameNum,timeSlot) >  mTransmitDeadlineClock + GSM::Time(51,0)) {
-    // stale burst
-    //LOG(DEBUG) << "FAST! "<< GSM::Time(frameNum,timeSlot);
-    //writeClockInterface();
-    }*/
-
-/*
-  DAB -- Just let these go through the demod.
-  if (GSM::Time(frameNum,timeSlot) < mTransmitDeadlineClock) {
-    // stale burst from GSM core
-    LOG(NOTICE) << "STALE packet on GSM->TRX interface at time "<< GSM::Time(frameNum,timeSlot);
-    return false;
-  }
-*/
-  
   // periodically update GSM core clock
-  LOG(DEBUG) << "mTransmitDeadlineClock " << *mTransmitDeadlineClock
-             << " mLastClockUpdateTime " << mLastClockUpdateTime;
-  if (*mTransmitDeadlineClock > mLastClockUpdateTime + GSM::Time(216,0))
-    writeClockInterface();
-
+  LOG(DEBUG) << "mTransmitDeadlineClock " << mDriveLoop->getDeadlineClock()
+             << " mLastClockUpdateTime " << mDriveLoop->getLastClockUpdate();
+  if (mDriveLoop->getDeadlineClock() > mDriveLoop->getLastClockUpdate() + GSM::Time(216,0)) {
+    mDriveLoop->writeClockInterface();
+  }
 
   LOG(DEBUG) << "rcvd. burst at: " << GSM::Time(frameNum,timeSlot);
   
@@ -589,23 +571,6 @@ bool Transceiver::driveTransmitPriorityQueue()
 
 
 }
-
-void Transceiver::writeClockInterface()
-{
-  char command[50];
-  // FIXME -- This should be adaptive.
-  sprintf(command,"IND CLOCK %llu",
-          (unsigned long long) (mTransmitDeadlineClock->FN() + 2));
-
-  LOG(INFO) << "ClockInterface: sending " << command;
-
-  mClockSocket.write(command,strlen(command)+1);
-
-  mLastClockUpdateTime = *mTransmitDeadlineClock;
-}   
-  
-
-
 
 void *FIFOServiceLoopAdapter(Transceiver *transceiver)
 {
@@ -629,13 +594,14 @@ void *TransmitPriorityQueueServiceLoopAdapter(Transceiver *transceiver)
 {
   while (transceiver->on()) {
     bool stale = false;
+
     // Flush the UDP packets until a successful transfer.
     while (!transceiver->driveTransmitPriorityQueue()) {
       stale = true; 
     }
     if (stale) {
       // If a packet was stale, remind the GSM stack of the clock.
-      transceiver->writeClockInterface();
+      transceiver->getDriveLoop()->writeClockInterface();
     }
     pthread_testcancel();
   }
