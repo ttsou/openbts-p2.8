@@ -73,9 +73,6 @@ private:
   void unModulateVector(signalVector wVector); 
 #endif
 
-  /** modulate and add a burst to the transmit queue */
-  void addRadioVector(BitVector &burst, int RSSI, GSM::Time &wTime);
-
   /** Push modulated burst into transmit FIFO corresponding to a particular timestamp */
   void pushRadioVector(GSM::Time &nowTime);
 
