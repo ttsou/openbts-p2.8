@@ -48,14 +48,14 @@
 
     tx_ampl           - Transmit amplitude must be between 0 and 1.0
 */
-const double master_clk_rt = 52e6;
+const double master_clk_rt = 13e6;
 const size_t smpl_buf_sz = (1 << 20);
 const float tx_ampl = .3;
 
 #ifdef RESAMPLE
 const double rx_smpl_offset = .00005;
 #else
-const double rx_smpl_offset = .0000869;
+const double rx_smpl_offset = 9.4457e-5; 
 #endif
 
 static TIMESTAMP init_rd_ts = 0;
