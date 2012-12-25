@@ -183,6 +183,10 @@ public:
 	double setTxGain(double db);
 	double maxTxGain(void) { return tx_gain_max; }
 	double minTxGain(void) { return tx_gain_min; }
+	void setTxAntenna(std::string &name);
+	void setRxAntenna(std::string &name);
+	std::string getRxAntenna();
+	std::string getTxAntenna();
 
 	double getTxFreq() { return tx_freq; }
 	double getRxFreq() { return rx_freq; }
@@ -383,6 +387,26 @@ double uhd_device::setRxGain(double db)
 	LOG(INFO) << "Set RX gain to " << rx_gain << "dB";
 
 	return rx_gain;
+}
+
+void uhd_device::setTxAntenna(std::string &name)
+{
+	usrp_dev->set_tx_antenna(name);
+}
+
+void uhd_device::setRxAntenna(std::string &name)
+{
+	usrp_dev->set_rx_antenna(name);
+}
+
+std::string uhd_device::getTxAntenna()
+{
+	return usrp_dev->get_tx_antenna();
+}
+
+std::string uhd_device::getRxAntenna()
+{
+	return usrp_dev->get_rx_antenna();
 }
 
 /*

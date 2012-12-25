@@ -117,6 +117,12 @@ class RadioDevice {
   /** return minimum Tx Gain **/
   virtual double minTxGain(void) = 0;
 
+  /** set and return antennas selection **/
+  virtual void setTxAntenna(std::string &name) = 0;
+  virtual void setRxAntenna(std::string &name) = 0;
+  virtual std::string getRxAntenna() = 0;
+  virtual std::string getTxAntenna() = 0;
+
   /** Return internal status values */
   virtual double getTxFreq()=0;
   virtual double getRxFreq()=0;
