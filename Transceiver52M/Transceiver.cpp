@@ -159,15 +159,25 @@ void Transceiver::pushRadioVector(GSM::Time &nowTime)
 {
 
   // dump stale bursts, if any
+  unsigned BCCH_SCH_FCCH_CCCH_Frames[26] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,30,31,40,41};
+
   while (radioVector* staleBurst = mTransmitPriorityQueue.getStaleBurst(nowTime)) {
     // Even if the burst is stale, put it in the fillter table.
     // (It might be an idle pattern.)
+    // Now we do it only for BEACON channels.
     LOG(NOTICE) << "dumping STALE burst in TRX->USRP interface";
     const GSM::Time& nextTime = staleBurst->getTime();
     int TN = nextTime.TN();
     int modFN = nextTime.FN() % fillerModulus[TN];
-    delete fillerTable[modFN][TN];
-    fillerTable[modFN][TN] = staleBurst;
+    if (TN==0) {
+       for (unsigned i =0; i < 26; i++) {
+         if(BCCH_SCH_FCCH_CCCH_Frames[i] == modFN) {
+            delete fillerTable[modFN][TN];
+            fillerTable[modFN][TN] = staleBurst;
+            break;
+         }
+       }
+    }
   }
   
   int TN = nowTime.TN();
@@ -176,8 +186,15 @@ void Transceiver::pushRadioVector(GSM::Time &nowTime)
   // if queue contains data at the desired timestamp, stick it into FIFO
   if (radioVector *next = (radioVector*) mTransmitPriorityQueue.getCurrentBurst(nowTime)) {
     LOG(DEBUG) << "transmitFIFO: wrote burst " << next << " at time: " << nowTime;
-    delete fillerTable[modFN][TN];
-    fillerTable[modFN][TN] = new signalVector(*(next));
+    if (TN==0) {
+       for (unsigned i =0; i < 26; i++) {
+         if(BCCH_SCH_FCCH_CCCH_Frames[i] == modFN) {
+            delete fillerTable[modFN][TN];
+            fillerTable[modFN][TN] = new signalVector(*(next));
+            break;
+         }
+       }
+    }
     mRadioInterface->driveTransmitRadio(*(next),(mChanType[TN]==NONE)); //fillerTable[modFN][TN]));
     delete next;
 #ifdef TRANSMIT_LOGGING
