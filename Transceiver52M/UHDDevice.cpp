@@ -35,6 +35,8 @@
 #define NUM_TX_CHANS      2
 #define TX_CHAN_OFFSET    2e6
 #define B100_CLK_RT       52e6 
+#define TX_AMPL           0.3;
+#define SAMPLE_BUF_SZ     (1 << 20)
 
 enum uhd_dev_type {
 	USRP1,
@@ -43,28 +45,53 @@ enum uhd_dev_type {
 	NUM_USRP_TYPES,
 };
 
+struct uhd_dev_offset {
+	enum uhd_dev_type type;
+	int sps;
+	double offset;
+};
+
 /*
-    master_clk_rt     - Master clock frequency - ignored if host resampling is
-                        enabled
+ * Tx / Rx sample offset values. In a perfect world, there is no group delay
+ * though analog components, and behaviour through digital filters exactly
+ * matches calculated values. In reality, there are unaccounted factors,
+ * which are captured in these empirically measured (using a loopback test)
+ * timing correction values.
+ *
+ * Notes:
+ *   USRP1 with timestamps is not supported by UHD.
+ */
+static struct uhd_dev_offset uhd_offsets[NUM_USRP_TYPES * 3] = {
+	{ USRP1, 1, 0.0 },
+	{ USRP1, 2, 0.0 },
+	{ USRP1, 4, 0.0 },
+	{ USRP2, 1, 5.4394e-5 },
+	{ USRP2, 2, 0.0 },
+	{ USRP2, 4, 0.0 },
+	{ B100,  1, 9.4778e-5 },
+	{ B100,  2, 5.1100e-5 },
+	{ B100,  4, 2.9418e-5 },
+};
 
-    rx_smpl_offset    - Timing correction in seconds between receive and
-                        transmit timestamps. This value corrects for delays on
-                        on the RF side of the timestamping point of the device.
-                        This value is generally empirically measured.
+static double get_dev_offset(enum uhd_dev_type type, int sps)
+{
+	if (type == USRP1) {
+		LOG(ERR) << "Invalid device type";
+		return 0.0;
+	}
 
-    smpl_buf_sz       - The receive sample buffer size in bytes.
+	switch (sps) {
+	case 1:
+		return uhd_offsets[3 * type + 0].offset;
+	case 2:
+		return uhd_offsets[3 * type + 1].offset;
+	case 4:
+		return uhd_offsets[3 * type + 2].offset;
+	}
 
-    tx_ampl           - Transmit amplitude must be between 0 and 1.0
-*/
-const double master_clk_rt = 13e6;
-const size_t smpl_buf_sz = (1 << 20);
-const float tx_ampl = .3;
-
-#ifdef RESAMPLE
-const double rx_smpl_offset = .00005;
-#else
-const double rx_smpl_offset = 9.4457e-5; 
-#endif
+	LOG(ERR) << "Unsupported samples-per-symbols: " << sps;
+	return 0.0;	
+}
 
 static TIMESTAMP init_rd_ts = 0;
 
@@ -158,7 +185,7 @@ private:
 */
 class uhd_device : public RadioDevice {
 public:
-	uhd_device(double rate, bool skip_rx);
+	uhd_device(double rate, int sps, bool skip_rx);
 	~uhd_device();
 
 	bool open(const std::string &args);
@@ -182,7 +209,7 @@ public:
 	inline TIMESTAMP initialWriteTimestamp() { return init_rd_ts; }
 	inline TIMESTAMP initialReadTimestamp() { return init_rd_ts; }
 
-	inline double fullScaleInputValue() { return 32000 * tx_ampl; }
+	inline double fullScaleInputValue() { return 32000 * TX_AMPL; }
 	inline double fullScaleOutputValue() { return 32000; }
 
 	double setRxGain(double db);
@@ -223,6 +250,7 @@ private:
 	enum TxWindowType tx_window;
 	enum uhd_dev_type dev_type;
 
+	int sps;
 	double desired_smpl_rt, actual_smpl_rt;
 
 	double tx_gain, tx_gain_min, tx_gain_max;
@@ -286,7 +314,7 @@ void uhd_msg_handler(uhd::msg::type_t type, const std::string &msg)
 	}
 }
 
-uhd_device::uhd_device(double rate, bool skip_rx)
+uhd_device::uhd_device(double rate, int sps, bool skip_rx)
 	: desired_smpl_rt(rate), actual_smpl_rt(0),
 	  tx_gain(0.0), tx_gain_min(0.0), tx_gain_max(0.0),
 	  rx_gain(0.0), rx_gain_min(0.0), rx_gain_max(0.0),
@@ -294,6 +322,7 @@ uhd_device::uhd_device(double rate, bool skip_rx)
 	  started(false), aligned(false), rx_pkt_cnt(0), drop_cnt(0),
 	  prev_ts(0,0), ts_offset(0), rx_smpl_buf(NULL)
 {
+	this->sps = sps;
 	this->skip_rx = skip_rx;
 }
 
@@ -511,11 +540,17 @@ bool uhd_device::open(const std::string &args)
 		return false;
 
 	// Create receive buffer
-	size_t buf_len = smpl_buf_sz / sizeof(uint32_t);
+	size_t buf_len = SAMPLE_BUF_SZ / sizeof(uint32_t);
 	rx_smpl_buf = new smpl_buf(buf_len, actual_smpl_rt);
 
 	// Set receive chain sample offset 
-	ts_offset = (TIMESTAMP)(rx_smpl_offset * actual_smpl_rt);
+	double offset = get_dev_offset(dev_type, sps);
+	if (offset == 0.0) {
+		LOG(ERR) << "Unsupported configuration, no correction applied";
+		ts_offset = 0;
+	} else  {
+		ts_offset = (TIMESTAMP) (offset * actual_smpl_rt);
+	}
 
 	// Initialize and shadow gain values 
 	init_gains();
@@ -1043,7 +1078,7 @@ std::string smpl_buf::str_code(ssize_t code)
 	}
 }
 
-RadioDevice *RadioDevice::make(double smpl_rt, bool skip_rx)
+RadioDevice *RadioDevice::make(double smpl_rt, int sps, bool skip_rx)
 {
-	return new uhd_device(smpl_rt, skip_rx);
+	return new uhd_device(smpl_rt, sps, skip_rx);
 }
