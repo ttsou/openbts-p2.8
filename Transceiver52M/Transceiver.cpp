@@ -55,7 +55,8 @@ Transceiver::Transceiver(int wBasePort,
 			 RadioInterface *wRadioInterface)
 	:mDataSocket(wBasePort+2,TRXAddress,wBasePort+102),
 	 mControlSocket(wBasePort+1,TRXAddress,wBasePort+101),
-	 mClockSocket(wBasePort,TRXAddress,wBasePort+100)
+	 mClockSocket(wBasePort,TRXAddress,wBasePort+100),
+	 mTSC(-1)
 {
   //GSM::Time startTime(0,0);
   //GSM::Time startTime(gHyperframe/2 - 4*216*60,0);
@@ -506,7 +507,7 @@ void Transceiver::driveControl()
   }
   else if (strcmp(command,"POWERON")==0) {
     // turn on transmitter/demod
-    if (!mTxFreq || !mRxFreq) 
+    if (!mTxFreq || !mRxFreq || (mTSC<0))
       sprintf(response,"RSP POWERON 1");
     else {
       sprintf(response,"RSP POWERON 0");
@@ -602,7 +603,7 @@ void Transceiver::driveControl()
     // set TSC
     int TSC;
     sscanf(buffer,"%3s %s %d",cmdcheck,command,&TSC);
-    if (mOn)
+    if (mOn || (TSC<0) || (TSC>7))
       sprintf(response,"RSP SETTSC 1 %d",TSC);
     else {
       mTSC = TSC;
@@ -611,11 +612,11 @@ void Transceiver::driveControl()
     }
   }
   else if (strcmp(command,"SETSLOT")==0) {
-    // set TSC 
+    // set slot type
     int  corrCode;
     int  timeslot;
     sscanf(buffer,"%3s %s %d %d",cmdcheck,command,&timeslot,&corrCode);
-    if ((timeslot < 0) || (timeslot > 7)) {
+    if ((mTSC<0) || (timeslot < 0) || (timeslot > 7)) {
       LOG(WARNING) << "bogus message on control interface";
       sprintf(response,"RSP SETSLOT 1 %d %d",timeslot,corrCode);
       return;

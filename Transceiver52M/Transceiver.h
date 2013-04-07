@@ -133,7 +133,7 @@ private:
   double mTxFreq;                      ///< the transmit frequency
   double mRxFreq;                      ///< the receive frequency
   int mPower;                          ///< the transmit power in dB
-  unsigned mTSC;                       ///< the midamble sequence code
+  int mTSC;                            ///< the midamble sequence code
   double mEnergyThreshold;             ///< threshold to determine if received data is potentially a GSM burst
   GSM::Time prevFalseDetectionTime;    ///< last timestamp of a false energy detection
   int fillerModulus[8];                ///< modulus values of all timeslots, in frames
