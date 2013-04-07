@@ -628,6 +628,7 @@ void Transceiver::driveControl()
   }
   else {
     LOG(WARNING) << "bogus command " << command << " on control interface.";
+    sprintf(response,"RSP ERR 1");
   }
 
   mControlSocket.write(response,strlen(response)+1);
