@@ -112,7 +112,7 @@ private:
  public:
 
   /** Object constructor */
-  USRPDevice (double _desiredSampleRate, bool skipRx);
+  USRPDevice(int sps, bool skipRx);
 
   /** Instantiate the USRP */
   bool open(const std::string &);

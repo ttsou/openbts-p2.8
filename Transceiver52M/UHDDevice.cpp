@@ -35,6 +35,8 @@
 #define NUM_TX_CHANS      2
 #define TX_CHAN_OFFSET    2e6
 #define B100_CLK_RT       52e6 
+#define B100_BASE_RT      GSMRATE
+#define USRP2_BASE_RT     400e3
 #define TX_AMPL           0.3;
 #define SAMPLE_BUF_SZ     (1 << 20)
 
@@ -50,6 +52,8 @@ struct uhd_dev_offset {
 	int sps;
 	double offset;
 };
+
+static TIMESTAMP init_rd_ts = 0;
 
 /*
  * Tx / Rx sample offset values. In a perfect world, there is no group delay
@@ -93,7 +97,28 @@ static double get_dev_offset(enum uhd_dev_type type, int sps)
 	return 0.0;	
 }
 
-static TIMESTAMP init_rd_ts = 0;
+/*
+ * Select sample rate based on device type and requested samples-per-symbol.
+ * The base rate is either GSM symbol rate, 270.833 kHz, or the minimum
+ * usable channel spacing of 400 kHz.
+ */ 
+static double select_rate(uhd_dev_type type, int sps)
+{
+	if ((sps != 4) && (sps != 2) && (sps != 1))
+		return -9999.99;
+
+	switch (type) {
+	case USRP2:
+		return USRP2_BASE_RT * sps;
+		break;
+	case B100:
+		return B100_BASE_RT * sps;
+		break;
+	}
+
+	LOG(ALERT) << "Unknown device type " << type;
+	return -9999.99;
+}
 
 /** Timestamp conversion
     @param timestamp a UHD or OpenBTS timestamp
@@ -185,7 +210,7 @@ private:
 */
 class uhd_device : public RadioDevice {
 public:
-	uhd_device(double rate, int sps, bool skip_rx);
+	uhd_device(int sps, bool skip_rx);
 	~uhd_device();
 
 	bool open(const std::string &args);
@@ -314,9 +339,8 @@ void uhd_msg_handler(uhd::msg::type_t type, const std::string &msg)
 	}
 }
 
-uhd_device::uhd_device(double rate, int sps, bool skip_rx)
-	: desired_smpl_rt(rate), actual_smpl_rt(0),
-	  tx_gain(0.0), tx_gain_min(0.0), tx_gain_max(0.0),
+uhd_device::uhd_device(int sps, bool skip_rx)
+	: tx_gain(0.0), tx_gain_min(0.0), tx_gain_max(0.0),
 	  rx_gain(0.0), rx_gain_min(0.0), rx_gain_max(0.0),
 	  tx_freq(0.0), rx_freq(0.0), tx_spp(0), rx_spp(0),
 	  started(false), aligned(false), rx_pkt_cnt(0), drop_cnt(0),
@@ -536,6 +560,7 @@ bool uhd_device::open(const std::string &args)
 	rx_spp = rx_stream->get_max_num_samps();
 
 	// Set rates
+	desired_smpl_rt = select_rate(dev_type, sps);
 	if (set_rates(desired_smpl_rt) < 0)
 		return false;
 
@@ -1077,7 +1102,7 @@ std::string smpl_buf::str_code(ssize_t code)
 	}
 }
 
-RadioDevice *RadioDevice::make(double smpl_rt, int sps, bool skip_rx)
+RadioDevice *RadioDevice::make(int sps, bool skip_rx)
 {
-	return new uhd_device(smpl_rt, sps, skip_rx);
+	return new uhd_device(sps, skip_rx);
 }
