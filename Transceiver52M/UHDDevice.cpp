@@ -495,15 +495,15 @@ bool uhd_device::parse_dev_type()
 {
 	std::string mboard_str, dev_str;
 	uhd::property_tree::sptr prop_tree;
-	size_t usrp1_str, usrp2_str, b100_str1, b100_str2;
+	size_t usrp1_str, usrp2_str, b100_str;
 
 	prop_tree = usrp_dev->get_device()->get_tree();
 	dev_str = prop_tree->access<std::string>("/name").get();
 	mboard_str = usrp_dev->get_mboard_name();
 
 	usrp1_str = dev_str.find("USRP1");
-	b100_str1 = dev_str.find("B-Series");
-	b100_str2 = mboard_str.find("B100");
+	usrp2_str = dev_str.find("USRP2");
+	b100_str = mboard_str.find("B100");
 
 	if (usrp1_str != std::string::npos) {
 		LOG(ALERT) << "USRP1 is not supported using the UHD driver";
@@ -512,14 +512,17 @@ bool uhd_device::parse_dev_type()
 		return false;
 	}
 
-	if ((b100_str1 != std::string::npos) || (b100_str2 != std::string::npos)) {
+	if (b100_str != std::string::npos) {
 		tx_window = TX_WINDOW_USRP1;
 		LOG(INFO) << "Using USRP1 type transmit window for "
 			  << dev_str << " " << mboard_str;
 		dev_type = B100;
 		return true;
-	} else {
+	} else if (usrp2_str != std::string::npos) {
 		dev_type = USRP2;
+	} else {
+		LOG(ALERT) << "Unknown UHD device type";
+		return false;
 	}
 
 	tx_window = TX_WINDOW_FIXED;
