@@ -115,7 +115,7 @@ private:
   USRPDevice(int sps, bool skipRx);
 
   /** Instantiate the USRP */
-  bool open(const std::string &);
+  int open(const std::string &);
 
   /** Start the USRP */
   bool start();

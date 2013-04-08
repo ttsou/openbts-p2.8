@@ -75,7 +75,7 @@ USRPDevice::USRPDevice(int sps, bool skipRx)
 #endif
 }
 
-bool USRPDevice::open(const std::string &)
+int USRPDevice::open(const std::string &)
 {
   writeLock.unlock();
 
@@ -97,7 +97,7 @@ bool USRPDevice::open(const std::string &)
   catch(...) {
     LOG(ALERT) << "make failed on Rx";
     m_uRx.reset();
-    return false;
+    return -1;
   }
 
   if (m_uRx->fpga_master_clock_freq() != masterClockRate)
@@ -105,7 +105,7 @@ bool USRPDevice::open(const std::string &)
     LOG(ALERT) << "WRONG FPGA clock freq = " << m_uRx->fpga_master_clock_freq()
                << ", desired clock freq = " << masterClockRate;
     m_uRx.reset();
-    return false;
+    return -1;
   }
   }
 
@@ -120,7 +120,7 @@ bool USRPDevice::open(const std::string &)
   catch(...) {
     LOG(ALERT) << "make failed on Tx";
     m_uTx.reset();
-    return false;
+    return -1;
   }
 
   if (m_uTx->fpga_master_clock_freq() != masterClockRate)
@@ -128,7 +128,7 @@ bool USRPDevice::open(const std::string &)
     LOG(ALERT) << "WRONG FPGA clock freq = " << m_uTx->fpga_master_clock_freq()
                << ", desired clock freq = " << masterClockRate;
     m_uTx.reset();
-    return false;
+    return -1;
   }
 
   if (!skipRx) m_uRx->stop();
@@ -165,7 +165,7 @@ bool USRPDevice::open(const std::string &)
   samplesWritten = 0;
   started = false;
   
-  return true;
+  return NORMAL;
 }
 
 

@@ -213,7 +213,7 @@ public:
 	uhd_device(int sps, bool skip_rx);
 	~uhd_device();
 
-	bool open(const std::string &args);
+	int open(const std::string &args);
 	bool start();
 	bool stop();
 	void restart(uhd::time_spec_t ts);
@@ -513,7 +513,7 @@ bool uhd_device::parse_dev_type()
 	return true;
 }
 
-bool uhd_device::open(const std::string &args)
+int uhd_device::open(const std::string &args)
 {
 	// Register msg handler
 	uhd::msg::register_handler(&uhd_msg_handler);
@@ -523,7 +523,7 @@ bool uhd_device::open(const std::string &args)
 	uhd::device_addrs_t dev_addrs = uhd::device::find(addr);
 	if (dev_addrs.size() == 0) {
 		LOG(ALERT) << "No UHD devices found with address '" << args << "'";
-		return false;
+		return -1;
 	}
 
 	// Use the first found device
@@ -532,12 +532,12 @@ bool uhd_device::open(const std::string &args)
 		usrp_dev = uhd::usrp::multi_usrp::make(dev_addrs[0]);
 	} catch(...) {
 		LOG(ALERT) << "UHD make failed, device " << dev_addrs[0].to_string();
-		return false;
+		return -1;
 	}
 
 	// Check for a valid device type and set bus type
 	if (!parse_dev_type())
-		return false;
+		return -1;
 
 #ifdef EXTREF
 	set_ref_clk(true);
@@ -562,7 +562,7 @@ bool uhd_device::open(const std::string &args)
 	// Set rates
 	desired_smpl_rt = select_rate(dev_type, sps);
 	if (set_rates(desired_smpl_rt) < 0)
-		return false;
+		return -1;
 
 	// Create receive buffer
 	size_t buf_len = SAMPLE_BUF_SZ / sizeof(uint32_t);
@@ -583,7 +583,10 @@ bool uhd_device::open(const std::string &args)
 	// Print configuration
 	LOG(INFO) << "\n" << usrp_dev->get_pp_string();
 
-	return true;
+	if (dev_type == USRP2)
+		return RESAMP;
+
+	return NORMAL;
 }
 
 bool uhd_device::flush_recv(size_t num_pkts)

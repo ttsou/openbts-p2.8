@@ -84,7 +84,8 @@ int main(int argc, char *argv[])
   srandom(time(NULL));
 
   RadioDevice *usrp = RadioDevice::make(SAMPSPERSYM);
-  if (!usrp->open(deviceArgs)) {
+  int radioType = usrp->open(deviceArgs);
+  if (radioType < 0) {
     LOG(ALERT) << "Transceiver exiting..." << std::endl;
     return EXIT_FAILURE;
   }
@@ -102,7 +103,19 @@ int main(int argc, char *argv[])
   LOG(INFO) << "transceiver using transmit antenna " << usrp->getRxAntenna();
   LOG(INFO) << "transceiver using receive antenna " << usrp->getTxAntenna();
 
-  RadioInterface* radio = new RadioInterface(usrp, 3, SAMPSPERSYM, false);
+  RadioInterface* radio;
+  switch (radioType) {
+  case RadioDevice::NORMAL:
+    radio = new RadioInterface(usrp, 3, SAMPSPERSYM, false);
+    break;
+  case RadioDevice::RESAMP:
+    radio = new RadioInterfaceResamp(usrp, 3, SAMPSPERSYM, false);
+    break;
+  default:
+    LOG(ALERT) << "Unsupported configuration";
+    return EXIT_FAILURE;
+  }
+
   Transceiver *trx = new Transceiver(gConfig.getNum("TRX.Port"),gConfig.getStr("TRX.IP").c_str(),SAMPSPERSYM,GSM::Time(3,0),radio);
   trx->receiveFIFO(radio->receiveFIFO());
 

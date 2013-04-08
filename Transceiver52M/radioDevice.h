@@ -33,10 +33,13 @@ class RadioDevice {
   /* Available transport bus types */
   enum TxWindowType { TX_WINDOW_USRP1, TX_WINDOW_FIXED };
 
+  /* Radio interface types */
+  enum RadioInterfaceType { NORMAL, RESAMP };
+
   static RadioDevice *make(int sps, bool skipRx = false);
 
   /** Initialize the USRP */
-  virtual bool open(const std::string &args)=0;
+  virtual int open(const std::string &args)=0;
 
   /** Start the USRP */
   virtual bool start()=0;
