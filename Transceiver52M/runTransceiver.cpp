@@ -89,7 +89,6 @@ int main(int argc, char *argv[])
 
   srandom(time(NULL));
 
-  int mOversamplingRate = numARFCN/2 + numARFCN;
   RadioDevice *usrp = RadioDevice::make(DEVICERATE * SAMPSPERSYM, SAMPSPERSYM);
   if (!usrp->open(deviceArgs)) {
     LOG(ALERT) << "Transceiver exiting..." << std::endl;
@@ -109,7 +108,7 @@ int main(int argc, char *argv[])
   LOG(INFO) << "transceiver using transmit antenna " << usrp->getRxAntenna();
   LOG(INFO) << "transceiver using receive antenna " << usrp->getTxAntenna();
 
-  RadioInterface* radio = new RadioInterface(usrp,3,SAMPSPERSYM,mOversamplingRate,false);
+  RadioInterface* radio = new RadioInterface(usrp, 3, SAMPSPERSYM, false);
   Transceiver *trx = new Transceiver(gConfig.getNum("TRX.Port"),gConfig.getStr("TRX.IP").c_str(),SAMPSPERSYM,GSM::Time(3,0),radio);
   trx->receiveFIFO(radio->receiveFIFO());
 
