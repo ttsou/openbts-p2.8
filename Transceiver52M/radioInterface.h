@@ -143,17 +143,17 @@ public:
   /** get transport window type of attached device */ 
   enum RadioDevice::TxWindowType getWindowType() { return mRadio->getWindowType(); }
 
+#if USRP1
 protected:
 
   /** drive synchronization of Tx/Rx of USRP */
   void alignRadio();
 
-  /** reset the interface */
-  void reset();
-
   friend void *AlignRadioServiceLoopAdapter(RadioInterface*);
-
+#endif
 };
 
+#if USRP1
 /** synchronization thread loop */
 void *AlignRadioServiceLoopAdapter(RadioInterface*);
+#endif
