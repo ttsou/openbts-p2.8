@@ -406,6 +406,9 @@ int uhd_device::set_master_clk(double clk_rate)
 
 int uhd_device::set_rates(double rate)
 {
+	double offset_limit = 10.0;
+	double tx_offset, rx_offset;
+
 	// B100 is the only device where we set FPGA clocking
 	if (dev_type == B100) {
 		if (set_master_clk(B100_CLK_RT) < 0)
@@ -417,13 +420,13 @@ int uhd_device::set_rates(double rate)
 	usrp_dev->set_rx_rate(rate);
 	actual_smpl_rt = usrp_dev->get_tx_rate();
 
-	if (actual_smpl_rt != rate) {
+	tx_offset = actual_smpl_rt - rate;
+	rx_offset = usrp_dev->get_rx_rate() - rate;
+	if ((tx_offset > offset_limit) || (rx_offset > offset_limit)) {
 		LOG(ALERT) << "Actual sample rate differs from desired rate";
+		LOG(ALERT) << "Tx/Rx (" << actual_smpl_rt << "/"
+			   << usrp_dev->get_rx_rate() << ")";
 		return -1;
-	}
-	if (usrp_dev->get_rx_rate() != actual_smpl_rt) {
-		LOG(ALERT) << "Transmit and receive sample rates do not match";
-		return -1.0;
 	}
 
 	return 0;
