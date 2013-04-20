@@ -34,6 +34,8 @@
 
 #define U1_DEFAULT_CLK_RT 64e6
 #define U2_DEFAULT_CLK_RT 100e6 
+#define NUM_TX_CHANS      2
+#define TX_CHAN_OFFSET    2e6
 
 /*
     master_clk_rt     - Master clock frequency - ignored if host resampling is
@@ -367,10 +369,11 @@ double uhd_device::set_rates(double rate)
 
 double uhd_device::setTxGain(double db)
 {
-	usrp_dev->set_tx_gain(db);
-	tx_gain = usrp_dev->get_tx_gain();
-
-	LOG(INFO) << "Set TX gain to " << tx_gain << "dB";
+	for (int i = 0; i < NUM_TX_CHANS; i++) {
+		usrp_dev->set_tx_gain(db, i);
+		tx_gain = usrp_dev->get_tx_gain(i);
+		LOG(INFO) << "Set TX gain to " << tx_gain << "dB";
+	}
 
 	return tx_gain;
 }
@@ -471,10 +474,18 @@ bool uhd_device::open(const std::string &args)
 #ifdef EXTREF
 	set_ref_clk(true);
 #endif
+	if (NUM_TX_CHANS == 2) {
+		uhd::usrp::subdev_spec_t subdev_spec("A:0 B:0");
+		usrp_dev->set_tx_subdev_spec(subdev_spec);
+	}
+
 	// Create TX and RX streamers
 	uhd::stream_args_t stream_args("sc16");
-	tx_stream = usrp_dev->get_tx_stream(stream_args);
 	rx_stream = usrp_dev->get_rx_stream(stream_args);
+
+	for (int i = 0; i < NUM_TX_CHANS; i++)
+		stream_args.channels.push_back(i);
+	tx_stream = usrp_dev->get_tx_stream(stream_args);
 
 	// Number of samples per over-the-wire packet
 	tx_spp = tx_stream->get_max_num_samps();
@@ -748,7 +759,8 @@ int uhd_device::writeSamples(short *buf, int len, bool *underrun,
 		}
 	}
 
-	size_t num_smpls = tx_stream->send(buf, len, metadata);
+	std::vector<short *> bufs(NUM_TX_CHANS, buf);
+	size_t num_smpls = tx_stream->send(bufs, len, metadata);
 
 	if (num_smpls != (unsigned) len) {
 		LOG(ALERT) << "UHD: Device send timed out";
@@ -768,9 +780,14 @@ bool uhd_device::updateAlignment(TIMESTAMP timestamp)
 
 bool uhd_device::setTxFreq(double wFreq)
 {
-	uhd::tune_result_t tr = usrp_dev->set_tx_freq(wFreq);
-	LOG(INFO) << "\n" << tr.to_pp_string();
-	tx_freq = usrp_dev->get_tx_freq();
+	for (int i = 0; i < NUM_TX_CHANS; i++) {
+		if (i)
+			wFreq += TX_CHAN_OFFSET;
+
+		uhd::tune_result_t tr = usrp_dev->set_tx_freq(wFreq, i);
+		LOG(INFO) << "\n" << tr.to_pp_string();
+		tx_freq = usrp_dev->get_tx_freq(i);
+	}
 
 	return true;
 }
