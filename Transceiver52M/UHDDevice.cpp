@@ -33,6 +33,7 @@
 #endif
 
 #define NUM_TX_CHANS      2
+#define NUM_RX_CHANS      NUM_TX_CHANS
 #define TX_CHAN_OFFSET    2e6
 #define B100_CLK_RT       52e6 
 #define USRP2_BASE_RT     400e3
@@ -75,7 +76,7 @@ static struct uhd_dev_offset uhd_offsets[NUM_USRP_TYPES * 3] = {
 	{ B100,  1, 9.4778e-5 },
 	{ B100,  2, 5.1100e-5 },
 	{ B100,  4, 2.9418e-5 },
-	{ UMTRX, 1, 0.0 },
+	{ UMTRX, 1, 9.1738e-5 },
 	{ UMTRX, 2, 0.0 },
 	{ UMTRX, 4, 0.0 },
 };
@@ -115,7 +116,7 @@ static double select_rate(uhd_dev_type type, int sps)
 		return USRP2_BASE_RT * sps;
 		break;
 	case B100:
-	case UmTRX:
+	case UMTRX:
 		return GSMRATE * sps;
 		break;
 	}
@@ -224,16 +225,16 @@ public:
 	void setPriority();
 	enum TxWindowType getWindowType() { return tx_window; }
 
-	int readSamples(short *buf, int len, bool *overrun, 
-			TIMESTAMP timestamp, bool *underrun, unsigned *RSSI);
+	int readSamples(short **buf, int chans, int len, TIMESTAMP timestamp,
+			bool *overrun, bool *underrun, unsigned *RSSI);
 
-	int writeSamples(short *buf, int len, bool *underrun, 
-			 TIMESTAMP timestamp, bool isControl);
+	int writeSamples(short **buf, int chans, int len, TIMESTAMP timestamp,
+			 bool *underrun, bool isControl);
 
 	bool updateAlignment(TIMESTAMP timestamp);
 
-	bool setTxFreq(double wFreq);
-	bool setRxFreq(double wFreq);
+	bool setTxFreq(double wFreq, int chan);
+	bool setRxFreq(double wFreq, int chan);
 
 	inline TIMESTAMP initialWriteTimestamp() { return init_rd_ts; }
 	inline TIMESTAMP initialReadTimestamp() { return init_rd_ts; }
@@ -298,7 +299,7 @@ private:
 	uhd::time_spec_t prev_ts;
 
 	TIMESTAMP ts_offset;
-	smpl_buf *rx_smpl_buf;
+	smpl_buf *rx_smpl_buf[NUM_RX_CHANS];
 
 	void init_gains();
 	void set_ref_clk(bool ext_clk);
@@ -349,19 +350,23 @@ uhd_device::uhd_device(int sps, bool skip_rx)
 	  rx_gain(0.0), rx_gain_min(0.0), rx_gain_max(0.0),
 	  tx_freq(0.0), rx_freq(0.0), tx_spp(0), rx_spp(0),
 	  started(false), aligned(false), rx_pkt_cnt(0), drop_cnt(0),
-	  prev_ts(0,0), ts_offset(0), rx_smpl_buf(NULL)
-	  async_event_thrd(NULL)
+	  prev_ts(0,0), ts_offset(0), async_event_thrd(NULL)
 {
 	this->sps = sps;
 	this->skip_rx = skip_rx;
+
+	for (int i = 0; i < NUM_RX_CHANS; i++)
+		rx_smpl_buf[i] = NULL;
 }
 
 uhd_device::~uhd_device()
 {
 	stop();
 
-	if (rx_smpl_buf)
-		delete rx_smpl_buf;
+	for (int i = 0; i < NUM_RX_CHANS; i++) {
+		if (rx_smpl_buf)
+			delete rx_smpl_buf;
+	}
 }
 
 void uhd_device::init_gains()
@@ -463,10 +468,11 @@ double uhd_device::setTxGain(double db)
 
 double uhd_device::setRxGain(double db)
 {
-	usrp_dev->set_rx_gain(db);
-	rx_gain = usrp_dev->get_rx_gain();
-
-	LOG(INFO) << "Set RX gain to " << rx_gain << "dB";
+	for (int i = 0; i < NUM_RX_CHANS; i++) {
+		usrp_dev->set_rx_gain(db);
+		rx_gain = usrp_dev->get_rx_gain();
+		LOG(INFO) << "Set RX gain to " << rx_gain << "dB";
+	}
 
 	return rx_gain;
 }
@@ -509,8 +515,8 @@ bool uhd_device::parse_dev_type()
 
 	usrp1_str = dev_str.find("USRP1");
 	usrp2_str = dev_str.find("USRP2");
+	umtrx_str = dev_str.find("UmTRX");
 	b100_str = mboard_str.find("B100");
-	umtrx_str = mboard_str.find("UmTRX");
 
 	if (usrp1_str != std::string::npos) {
 		LOG(ALERT) << "USRP1 is not supported using the UHD driver";
@@ -572,28 +578,29 @@ int uhd_device::open(const std::string &args)
 	if (NUM_TX_CHANS == 2) {
 		uhd::usrp::subdev_spec_t subdev_spec("A:0 B:0");
 		usrp_dev->set_tx_subdev_spec(subdev_spec);
+		usrp_dev->set_rx_subdev_spec(subdev_spec);
 	}
-
-	// Create TX and RX streamers
-	uhd::stream_args_t stream_args("sc16");
-	rx_stream = usrp_dev->get_rx_stream(stream_args);
-
-	for (int i = 0; i < NUM_TX_CHANS; i++)
-		stream_args.channels.push_back(i);
-	tx_stream = usrp_dev->get_tx_stream(stream_args);
-
-	// Number of samples per over-the-wire packet
-	tx_spp = tx_stream->get_max_num_samps();
-	rx_spp = rx_stream->get_max_num_samps();
 
 	// Set rates
 	desired_smpl_rt = select_rate(dev_type, sps);
 	if (set_rates(desired_smpl_rt) < 0)
 		return -1;
 
+	// Create TX and RX streamers
+	uhd::stream_args_t stream_args("sc16");
+	for (int i = 0; i < NUM_TX_CHANS; i++)
+		stream_args.channels.push_back(i);
+	tx_stream = usrp_dev->get_tx_stream(stream_args);
+	rx_stream = usrp_dev->get_rx_stream(stream_args);
+
+	// Number of samples per over-the-wire packet
+	tx_spp = tx_stream->get_max_num_samps();
+	rx_spp = rx_stream->get_max_num_samps();
+
 	// Create receive buffer
 	size_t buf_len = SAMPLE_BUF_SZ / sizeof(uint32_t);
-	rx_smpl_buf = new smpl_buf(buf_len, actual_smpl_rt);
+	for (int i = 0; i < NUM_RX_CHANS; i++)
+		rx_smpl_buf[i] = new smpl_buf(buf_len, actual_smpl_rt);
 
 	// Set receive chain sample offset 
 	double offset = get_dev_offset(dev_type, sps);
@@ -620,14 +627,19 @@ bool uhd_device::flush_recv(size_t num_pkts)
 {
 	uhd::rx_metadata_t md;
 	size_t num_smpls;
-	uint32_t buff[rx_spp];
 	float timeout;
 
 	// Use .01 sec instead of the default .1 sec
 	timeout = .01;
 
+	std::vector<std::vector<std::complex<short> > > bufs(
+		NUM_RX_CHANS, std::vector<std::complex<short> >(rx_spp));
+	std::vector<std::complex<short> *> buf_ptrs;
+	for (int i = 0; i < bufs.size(); i++)
+		buf_ptrs.push_back(&bufs[i].front());
+
 	for (size_t i = 0; i < num_pkts; i++) {
-		num_smpls = rx_stream->recv(buff, rx_spp, md,
+		num_smpls = rx_stream->recv(buf_ptrs, rx_spp, md,
 					    timeout, true);
 		if (!num_smpls) {
 			switch (md.error_code) {
@@ -644,30 +656,15 @@ bool uhd_device::flush_recv(size_t num_pkts)
 
 void uhd_device::restart(uhd::time_spec_t ts)
 {
-	uhd::stream_cmd_t cmd = uhd::stream_cmd_t::STREAM_MODE_STOP_CONTINUOUS;
-	usrp_dev->issue_stream_cmd(cmd);
-
-	flush_recv(50);
-
 	usrp_dev->set_time_now(ts);
 	aligned = false;
 
-	cmd = uhd::stream_cmd_t::STREAM_MODE_START_CONTINUOUS;
-	cmd.stream_now = true;
+	uhd::stream_cmd_t cmd = uhd::stream_cmd_t::STREAM_MODE_START_CONTINUOUS;
+	cmd.time_spec = uhd::time_spec_t(0.1);
+	cmd.stream_now = false;
 	usrp_dev->issue_stream_cmd(cmd);
 
 	uhd::rx_metadata_t md;
-	uint32_t buff[rx_spp];
-
-	for (int i = 0; i < 50; i++) {
-		usrp_dev->get_device()->recv(buff,
-					     rx_spp,
-					     md,
-					     uhd::io_type_t::COMPLEX_INT16,
-					     uhd::device::RECV_MODE_ONE_PACKET);
-	}
-
-	init_rd_ts = convert_time(md.time_spec, actual_smpl_rt);
 }
 
 bool uhd_device::start()
@@ -760,39 +757,48 @@ int uhd_device::check_rx_md_err(uhd::rx_metadata_t &md, ssize_t num_smpls)
 	return 0;
 }
 
-int uhd_device::readSamples(short *buf, int len, bool *overrun,
-			TIMESTAMP timestamp, bool *underrun, unsigned *RSSI)
+int uhd_device::readSamples(short **buf, int chans, int len,
+			    TIMESTAMP timestamp, bool *overrun,
+			    bool *underrun, unsigned *RSSI)
 {
 	ssize_t rc;
 	uhd::time_spec_t ts;
 	uhd::rx_metadata_t metadata;
-	uint32_t pkt_buf[rx_spp];
 
-	if (skip_rx)
+	if (skip_rx) {
+		LOG(INFO) << "Skipping Rx";
 		return 0;
+	}
+
+	if (chans != NUM_RX_CHANS) {
+		LOG(ERR) << "Number of requested channels does not match build";
+		return -1;
+	}
 
 	// Shift read time with respect to transmit clock
 	timestamp += ts_offset;
 
 	ts = convert_time(timestamp, actual_smpl_rt);
-	LOG(DEBUG) << "Requested timestamp = " << ts.get_real_secs();
+	LOG(DEBUG) << "Requested UHD timestamp = " << ts.get_real_secs();
 
 	// Check that timestamp is valid
-	rc = rx_smpl_buf->avail_smpls(timestamp);
+	rc = rx_smpl_buf[0]->avail_smpls(timestamp);
 	if (rc < 0) {
-		LOG(ERR) << rx_smpl_buf->str_code(rc);
-		LOG(ERR) << rx_smpl_buf->str_status();
+		LOG(ERR) << rx_smpl_buf[0]->str_code(rc);
+		LOG(ERR) << rx_smpl_buf[0]->str_status();
 		return 0;
 	}
 
+	std::vector<std::vector<std::complex<short> > > bufs(
+		NUM_RX_CHANS, std::vector<std::complex<short> >(rx_spp));
+	std::vector<std::complex<short> *> buf_ptrs;
+	for (int i = 0; i < bufs.size(); i++)
+		buf_ptrs.push_back(&bufs[i].front());
+
 	// Receive samples from the usrp until we have enough
-	while (rx_smpl_buf->avail_smpls(timestamp) < len) {
-		size_t num_smpls = rx_stream->recv(
-					(void*)pkt_buf,
-					rx_spp,
-					metadata,
-					0.1,
-					true);
+	while (rx_smpl_buf[0]->avail_smpls(timestamp) < len) {
+		size_t num_smpls = rx_stream->recv(buf_ptrs, rx_spp,
+						   metadata, 0.1, true);
 		rx_pkt_cnt++;
 
 		// Check for errors 
@@ -805,39 +811,45 @@ int uhd_device::readSamples(short *buf, int len, bool *overrun,
 		case ERROR_TIMING:
 			restart(prev_ts);
 		case ERROR_UNHANDLED:
+			LOG(ALERT) << "UHD: Unhandled error";
 			continue;
 		}
 
-
 		ts = metadata.time_spec;
-		LOG(DEBUG) << "Received timestamp = " << ts.get_real_secs();
+		LOG(DEBUG) << "Received " << num_smpls << " samples "
+			   << "with timestamp = " << ts.get_real_secs();
 
-		rc = rx_smpl_buf->write(pkt_buf,
-					num_smpls,
-					metadata.time_spec);
-
-		// Continue on local overrun, exit on other errors
-		if ((rc < 0)) {
-			LOG(ERR) << rx_smpl_buf->str_code(rc);
-			LOG(ERR) << rx_smpl_buf->str_status();
-			if (rc != smpl_buf::ERROR_OVERFLOW)
-				return 0;
+		for (int i = 0; i < NUM_RX_CHANS; i++) {
+			rc = rx_smpl_buf[i]->write((short *) &bufs[i].front(),
+						   num_smpls,
+						   metadata.time_spec);
+                        
+			// Continue on local overrun, exit on other errors
+			if ((rc < 0)) {
+				LOG(ERR) << rx_smpl_buf[i]->str_code(rc);
+				LOG(ERR) << rx_smpl_buf[i]->str_status();
+				if (rc != smpl_buf::ERROR_OVERFLOW)
+					return 0;
+			}
 		}
 	}
 
 	// We have enough samples
-	rc = rx_smpl_buf->read(buf, len, timestamp);
-	if ((rc < 0) || (rc != len)) {
-		LOG(ERR) << rx_smpl_buf->str_code(rc);
-		LOG(ERR) << rx_smpl_buf->str_status();
-		return 0;
+	for (int i = 0; i < NUM_RX_CHANS; i++) {
+		rc = rx_smpl_buf[i]->read(buf[i], len, timestamp);
+		if ((rc < 0) || (rc != len)) {
+			LOG(ERR) << rx_smpl_buf[i]->str_code(rc);
+			LOG(ERR) << rx_smpl_buf[i]->str_status();
+			return 0;
+		}
 	}
 
 	return len;
 }
 
-int uhd_device::writeSamples(short *buf, int len, bool *underrun,
-			unsigned long long timestamp,bool isControl)
+int uhd_device::writeSamples(short **buf, int chans, int len,
+			     TIMESTAMP timestamp, bool *underrun,
+			     bool isControl)
 {
 	uhd::tx_metadata_t metadata;
 	metadata.has_time_spec = true;
@@ -870,9 +882,11 @@ int uhd_device::writeSamples(short *buf, int len, bool *underrun,
 		}
 	}
 
-	std::vector<short *> bufs(NUM_TX_CHANS, buf);
-	size_t num_smpls = tx_stream->send(bufs, len, metadata);
+	std::vector<short *> bufs(NUM_TX_CHANS);
+	for (int i = 0; i < NUM_TX_CHANS; i++)
+		bufs[i] = buf[i];
 
+	size_t num_smpls = tx_stream->send(bufs, len, metadata);
 	if (num_smpls != (unsigned) len) {
 		LOG(ALERT) << "UHD: Device send timed out";
 		LOG(ALERT) << "UHD: Version " << uhd::get_version_string();
@@ -888,25 +902,30 @@ bool uhd_device::updateAlignment(TIMESTAMP timestamp)
 	return true;
 }
 
-bool uhd_device::setTxFreq(double wFreq)
+bool uhd_device::setTxFreq(double wFreq, int chan)
 {
-	for (int i = 0; i < NUM_TX_CHANS; i++) {
-		if (i)
-			wFreq += TX_CHAN_OFFSET;
-
-		uhd::tune_result_t tr = usrp_dev->set_tx_freq(wFreq, i);
-		LOG(INFO) << "\n" << tr.to_pp_string();
-		tx_freq = usrp_dev->get_tx_freq(i);
+	if (chan >= NUM_TX_CHANS) {
+		LOG(ALERT) << "Attempting to tune non-existent channel";
+		return false;
 	}
+
+	uhd::tune_result_t tr = usrp_dev->set_tx_freq(wFreq, chan);
+	LOG(INFO) << "\n" << tr.to_pp_string();
+	tx_freq = usrp_dev->get_tx_freq(chan);
 
 	return true;
 }
 
-bool uhd_device::setRxFreq(double wFreq)
+bool uhd_device::setRxFreq(double wFreq, int chan)
 {
-	uhd::tune_result_t tr = usrp_dev->set_rx_freq(wFreq);
+	if (chan >= NUM_RX_CHANS) {
+		LOG(ALERT) << "Attempting to tune non-existent channel";
+		return false;
+	}
+
+	uhd::tune_result_t tr = usrp_dev->set_rx_freq(wFreq, chan);
 	LOG(INFO) << "\n" << tr.to_pp_string();
-	rx_freq = usrp_dev->get_rx_freq();
+	rx_freq = usrp_dev->get_rx_freq(chan);
 
 	return true;
 }

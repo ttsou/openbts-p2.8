@@ -104,9 +104,10 @@ public:
       @param radioInterface associated radioInterface object
   */
   DriveLoop(int wBasePort, const char *TRXAddress,
-	    int wChanM, int wC0, int wSamplesPerSymbol,
-	    GSM::Time wTransmitLatency,
-	    RadioInterface *wRadioInterface);
+	    RadioInterface *wRadioInterface,
+	    int wChanM = 1, int wC0 = 0,
+            int wSamplesPerSymbol = SAMPSPERSYM,
+	    GSM::Time wTransmitLatency = GSM::Time(3, 0));
    
   /** Destructor */
   ~DriveLoop();

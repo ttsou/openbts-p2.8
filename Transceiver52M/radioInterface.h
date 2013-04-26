@@ -26,7 +26,7 @@
 #define SAMPSPERSYM 1
 #define INCHUNK    (625)
 #define OUTCHUNK   (625)
-#define CHAN_M      5
+#define CHAN_MAX    2
 
 
 static const unsigned gSlotLen = 148;      ///< number of symbols per slot, not counting guard periods
@@ -49,8 +49,6 @@ protected:
   float *rcvBuffer[CHAN_MAX];
   unsigned rcvCursor;
 
-  bool chanActive[CHAN_MAX];
- 
   bool underrun;			      ///< indicates writes to USRP are too slow
   bool overrun;				      ///< indicates reads from USRP are too slow
   TIMESTAMP writeTimestamp;		      ///< sample timestamp of next packet written to USRP
@@ -103,11 +101,11 @@ public:
   void close();
 
   /** constructor */
-  RadioInterface(RadioDevice* wRadio = NULL,
+  RadioInterface(RadioDevice* wRadio,
 		 int wChanM = 1,
-		 int receiveOffset = 3,
 		 int wSPS = SAMPSPERSYM,
-		 GSM::Time wStartTime = GSM::Time(0));
+                 int receiveOffset = 3,
+		 GSM::Time wStartTime = GSM::Time(0, 0));
     
   /** destructor */
   ~RadioInterface();
@@ -115,10 +113,7 @@ public:
   void setSamplesPerSymbol(int wSamplesPerSymbol) {if (!mOn) samplesPerSymbol = wSamplesPerSymbol;}
 
   int getSamplesPerSymbol() { return samplesPerSymbol;}
-
-  /** check for underrun, resets underrun value */
-  bool isUnderrun();
-  
+ 
   /** return the receive FIFO */
   VectorFIFO* receiveFIFO(int num) { return &mReceiveFIFO[num];}
 
@@ -126,10 +121,10 @@ public:
   RadioClock* getClock(void) { return &mClock;};
 
   /** set transmit frequency */
-  bool tuneTx(double freq);
+  bool tuneTx(double freq, int chan = 0);
 
   /** set receive frequency */
-  bool tuneRx(double freq);
+  bool tuneRx(double freq, int chan = 0);
 
   /** set receive gain */
   double setRxGain(double dB);
@@ -156,41 +151,6 @@ public:
 
   /** get transport window type of attached device */ 
   enum RadioDevice::TxWindowType getWindowType() { return mRadio->getWindowType(); }
-
-#if USRP1
-protected:
-
-  /** drive synchronization of Tx/Rx of USRP */
-  void alignRadio();
-
-  /** reset the interface */
-  void reset();
-
-  /** interface status */
-  bool on() { return mOn; }
-
-  friend void *AlignRadioServiceLoopAdapter(RadioInterface*);
-#endif
-};
-
-#if USRP1
-/** synchronization thread loop */
-void *AlignRadioServiceLoopAdapter(RadioInterface*);
-#endif
-
-class RadioInterfaceResamp : public RadioInterface {
-
-private:
-
-  void pushBuffer();
-  void pullBuffer();
-
-public:
-
-  RadioInterfaceResamp(RadioDevice* wRadio = NULL,
-		       int receiveOffset = 3,
-		       int wSPS = SAMPSPERSYM,
-		       GSM::Time wStartTime = GSM::Time(0));
 };
 
 #endif /* _RADIOINTEFACE_H_ */

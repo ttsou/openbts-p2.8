@@ -48,23 +48,18 @@ using namespace GSM;
 
 #define INIT_ENERGY_THRSHD		5.0f
 
-Transceiver::Transceiver(int wBasePort,
-			 const char *TRXAddress,
-			 int wSamplesPerSymbol,
-			 RadioInterface *wRadioInterface,
-			 DriveLoop *wDriveLoop,
-			 int wChannel, bool wPrimary)
+Transceiver::Transceiver(int wBasePort, const char *TRXAddress,
+			 DriveLoop *wDriveLoop, RadioInterface *wRadioInterface,
+			 int wSamplesPerSymbol, int wChannel, bool wPrimary)
 	:mDataSocket(wBasePort+2,TRXAddress,wBasePort+102),
 	 mControlSocket(wBasePort+1,TRXAddress,wBasePort+101),
-	 mDriveLoop(wDriveLoop), mTransmitPriorityQueue(NULL),
-	 mChannel(wChannel), mPrimary(wPrimary), mTSC(-1)
+	 mDriveLoop(wDriveLoop), mRadioInterface(wRadioInterface),
+	 mSamplesPerSymbol(wSamplesPerSymbol), mTransmitPriorityQueue(NULL),
+	 mChannel(wChannel), mPrimary(wPrimary)
 {
   mFIFOServiceLoopThread = NULL;
   mControlServiceLoopThread = NULL;
   mTransmitPriorityQueueServiceLoopThread = NULL;
-
-  mSamplesPerSymbol = wSamplesPerSymbol;
-  mRadioInterface = wRadioInterface;
   mMaxExpectedDelay = 0;
 
   // generate pulse and setup up signal processing library
@@ -89,11 +84,7 @@ Transceiver::Transceiver(int wBasePort,
   mRunning = false;
   mTxFreq = 0.0;
   mRxFreq = 0.0;
-
-  if (mPrimary)
-    mFreqOffset = mChannel * CHAN_RATE;
-  else
-    mFreqOffset = 0.0;
+  mFreqOffset = 0.0;
 
   mPower = -10;
   mEnergyThreshold = INIT_ENERGY_THRSHD;
@@ -461,7 +452,7 @@ void Transceiver::driveControl()
     int freqKhz;
     sscanf(buffer,"%3s %s %d",cmdcheck,command,&freqKhz);
     mRxFreq = freqKhz * 1.0e3 + mFreqOffset;
-    if (mPrimary && (!mRadioInterface->tuneRx(mRxFreq))) {
+    if (!mRadioInterface->tuneRx(mRxFreq, mChannel)) {
       LOG(ALERT) << "RX failed to tune";
       sprintf(response,"RSP RXTUNE 1 %d",freqKhz);
     } else {
@@ -474,7 +465,7 @@ void Transceiver::driveControl()
     sscanf(buffer,"%3s %s %d",cmdcheck,command,&freqKhz);
     //freqKhz = 890e3;
     mTxFreq = freqKhz * 1.0e3 + mFreqOffset;
-    if (mPrimary && (!mRadioInterface->tuneTx(mTxFreq))) {
+    if (!mRadioInterface->tuneTx(mTxFreq, mChannel)) {
       LOG(ALERT) << "TX failed to tune";
       sprintf(response,"RSP TXTUNE 1 %d",freqKhz);
     } else {

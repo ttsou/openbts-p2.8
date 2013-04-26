@@ -52,15 +52,14 @@ COMMON_SOURCES = \
 	radioVector.cpp \
 	radioClock.cpp \
 	sigProcLib.cpp \
+	DriveLoop.cpp \
 	Transceiver.cpp \
 	DummyLoad.cpp
 
 libtransceiver_la_SOURCES = \
-	$(COMMON_SOURCES) \
-	radioInterfaceResamp.cpp
+	$(COMMON_SOURCES)
 
 noinst_PROGRAMS = \
-	USRPping \
 	transceiver \
 	sigProcLibTest 
 
@@ -77,12 +76,7 @@ noinst_HEADERS = \
 	rcvLPF_651.h \
 	sendLPF_961.h
 
-USRPping_SOURCES = USRPping.cpp
-USRPping_LDADD = \
-	libtransceiver.la \
-	$(COMMON_LA) $(SQLITE_LA)
-
-transceiver_SOURCES = runTransceiver.cpp
+transceiver_SOURCES = multiTRX.cpp
 transceiver_LDADD = \
 	libtransceiver.la \
 	$(GSM_LA) \
@@ -98,13 +92,11 @@ sigProcLibTest_LDADD = \
 if UHD
 libtransceiver_la_SOURCES += UHDDevice.cpp
 transceiver_LDADD += $(UHD_LIBS)
-USRPping_LDADD += $(UHD_LIBS)
 sigProcLibTest_LDADD += $(UHD_LIBS)
 else
 if USRP1
 libtransceiver_la_SOURCES += USRPDevice.cpp
 transceiver_LDADD += $(USRP_LIBS)
-USRPping_LDADD += $(USRP_LIBS)
 sigProcLibTest_LDADD += $(USRP_LIBS)
 else
 #we should never be here, as one of the above mustbe defined for us to build

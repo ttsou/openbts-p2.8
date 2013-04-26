@@ -26,13 +26,11 @@
 #include "Transceiver.h"
 #include "radioDevice.h"
 
-#define DEVICERATE (400e3 * CHAN_M)
-
 ConfigurationTable gConfig("/etc/OpenBTS/OpenBTS.db");
 
 volatile bool gbShutdown = false;
 
-int Transceiver::mTSC = 0;
+int Transceiver::mTSC = -1;
 
 static void sigHandler(int signum)
 {
@@ -50,72 +48,26 @@ static int setupSignals()
 
 	if (sigaction(SIGINT, &action, NULL) < 0)
 		return -1;
-
 	if (sigaction(SIGTERM, &action, NULL) < 0)
 		return -1;
 
 	return 0;
 }
 
-/*
- * Generate the channel-transceiver ordering. Attempt to match the RAD1
- * ordering where the active channels are centered in the overall device
- * bandwidth. C0 is always has the lowest ARFCN with increasing subsequent
- * channels. When an even number of channels is selected, the carriers will
- * be offset from the RF center by -200 kHz, or half ARFCN spacing.
- */
-static void genChanMap(int numARFCN, int chanM, int *chans)
-{
-	int i, n;
-
-	chans[0] = numARFCN / 2; 
-
-	for (i = 1, n = 1; i < numARFCN; i++) {
-		if (!chans[i - 1])
-			chans[i] = chanM - 1;
-		else
-			chans[i] = chans[i - 1] - 1;
-	}
-}
-
-static void createTrx(Transceiver **trx, int *map, int num,
-		      RadioInterface *radio, DriveLoop *drive)
-{
-	int i;
-	bool primary = true;
-
-	for (i = 0; i < num; i++) {
-		LOG(NOTICE) << "Creating TRX" << i
-			    << " attached on channel " << map[i];
-
-		radio->activateChan(map[i]);
-		trx[i] = new Transceiver(5700 + 2 * i, "127.0.0.1",
-					 SAMPSPERSYM, radio, drive,
-					 map[i], primary);
-		trx[i]->start();
-		primary = false;
-	}
-}
-
 int main(int argc, char *argv[])
 {
-	int i, chanM, numARFCN = 1;
-	int chanMap[CHAN_MAX];
-	RadioDevice *usrp;
-	RadioInterface* radio;
-	DriveLoop *drive;
-	Transceiver *trx[CHAN_MAX];
-
-	gLogInit("transceiver", gConfig.getStr("Log.Level").c_str(), LOG_LOCAL7);
+	int numARFCN = 1;
 
 	if (argc > 1) {
 		numARFCN = atoi(argv[1]);
-		if (numARFCN > (CHAN_MAX - 1)) {
-			LOG(ALERT) << numARFCN << " channels not supported with current build";
+		if (numARFCN > CHAN_MAX) {
+			LOG(ALERT) << numARFCN  << " channels not supported "
+						<< " with with current build";
 			exit(-1);
 		}
 	}
 
+	gLogInit("transceiver", gConfig.getStr("Log.Level").c_str(), LOG_LOCAL7);
 	srandom(time(NULL));
 
 	if (setupSignals() < 0) {
@@ -123,58 +75,49 @@ int main(int argc, char *argv[])
 		exit(-1);
 	}
 
-	/*
-	 * Select the number of channels according to the number of ARFCNs's
-	 * and generate ARFCN-to-channelizer path mappings. The channelizer
-	 * aliases and extracts 'M' equally spaced channels to baseband. The
-	 * number of ARFCN's must be less than the number of channels in the
-	 * channelizer.
-	 */
-	switch (numARFCN) {
-	case 1:
-		chanM = 1;
-		break;
-	case 2:
-	case 3:
-		chanM = 5;
-		break;
-	default:
-		chanM = 10;
-	}
-	genChanMap(numARFCN, chanM, chanMap);
-
-	usrp = RadioDevice::make(DEVICERATE);
-	if (!usrp->open()) {
+	RadioDevice *device = RadioDevice::make(SAMPSPERSYM);
+	int radioType = device->open("");
+	if (radioType < 0) {
 		LOG(ALERT) << "Failed to open device, exiting...";
 		return EXIT_FAILURE;
 	}
 
-	radio = new RadioInterface(usrp, chanM, 3, SAMPSPERSYM, 0, false);
-	drive = new DriveLoop(5700, "127.0.0.1", chanM, chanMap[0],
-			      SAMPSPERSYM, GSM::Time(3,0), radio);
-
-	/* Create, attach, and activate all transceivers */
-	createTrx(trx, chanMap, numARFCN, radio, drive);
-
-	while (!gbShutdown) { 
-		sleep(1);
+	RadioInterface *radio;
+	switch (radioType) {
+	case RadioDevice::NORMAL:
+		radio = new RadioInterface(device, numARFCN);
+		break;
+	case RadioDevice::RESAMP:
+	default:
+		LOG(ALERT) << "Unsupported configuration";
+		return EXIT_FAILURE;
 	}
+
+	DriveLoop *drive = new DriveLoop(5700, "127.0.0.1", radio, numARFCN, 0);
+
+	Transceiver *trx[CHAN_MAX];
+	bool primary = true;
+	for (int i = 0; i < numARFCN; i++) {
+		trx[i] = new Transceiver(5700 + 2 * i, "127.0.0.1",
+					 drive, radio, SAMPSPERSYM,
+					 i, primary);
+		trx[i]->start();
+		primary = false;
+	}
+
+	while (!gbShutdown)
+		sleep(1);
 
 	LOG(NOTICE) << "Shutting down transceivers...";
-	for (i = 0; i < numARFCN; i++) {
+	for (int i = 0; i < numARFCN; i++)
 		trx[i]->shutdown();
-	}
 
-	/*
-	 * Allow time for threads to end before we start freeing objects
-	 */
+	/* Allow time for threads to end before we start freeing objects */
 	sleep(2);
 
-	for (i = 0; i < numARFCN; i++) {
+	for (int i = 0; i < numARFCN; i++)
 		delete trx[i];
-	}
-
 	delete drive;
 	delete radio;
-	delete usrp;
+	delete device;
 }

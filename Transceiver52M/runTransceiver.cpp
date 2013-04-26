@@ -109,8 +109,6 @@ int main(int argc, char *argv[])
     radio = new RadioInterface(usrp, 3, SAMPSPERSYM, false);
     break;
   case RadioDevice::RESAMP:
-    radio = new RadioInterfaceResamp(usrp, 3, SAMPSPERSYM, false);
-    break;
   default:
     LOG(ALERT) << "Unsupported configuration";
     return EXIT_FAILURE;

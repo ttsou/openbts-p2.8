@@ -26,9 +26,9 @@
 #include <Logger.h>
 
 DriveLoop::DriveLoop(int wBasePort, const char *TRXAddress,
+                     RadioInterface *wRadioInterface,
 		     int wChanM, int wC0, int wSamplesPerSymbol,
-                     GSM::Time wTransmitLatency,
-                     RadioInterface *wRadioInterface)
+                     GSM::Time wTransmitLatency)
 	:mClockSocket(wBasePort, TRXAddress, wBasePort + 100), mC0(wC0)
 {
   mChanM = wChanM;

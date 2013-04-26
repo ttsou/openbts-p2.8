@@ -28,8 +28,8 @@
 bool started = false;
 
 /* Device side buffers */
-static short rx_buf[OUTCHUNK * 2 * 2];
-static short tx_buf[INCHUNK * 2 * 2];
+static short *rx_buf[CHAN_MAX];
+static short *tx_buf[CHAN_MAX];
 
 /* Complex float to short conversion */
 static void floatToShort(short *out, float *in, int num)
@@ -51,34 +51,25 @@ static void shortToFloat(float *out, short *in, int num)
 
 RadioInterface::RadioInterface(RadioDevice *wRadio,
 			       int wChanM,
-			       int wReceiveOffset,
 			       int wSPS,
+                               int wReceiveOffset,
 			       GSM::Time wStartTime)
   : mChanM(wChanM), underrun(false), sendCursor(0), rcvCursor(0), mOn(false),
-    mRadio(wRadio), receiveOffset(wReceiveOffset),
-    samplesPerSymbol(wSPS), powerScaling(1.0),
-    loadTest(false)
+    mRadio(wRadio), receiveOffset(wReceiveOffset), samplesPerSymbol(wSPS),
+    powerScaling(1.0), loadTest(false)
 {
-  int i;
-
   mClock.set(wStartTime);
-
-  for (i = 0; i < mChanM; i++) {
-    chanActive[i] = false;
-  }
 }
 
 RadioInterface::~RadioInterface(void)
 {
-  int i;
-
   if (mOn) {
     mRadio->stop();
     close();
  
     delete mAlignRadioServiceLoopThread;
 
-    for (i = 0; i < mChanM; i++) {
+    for (int i = 0; i < mChanM; i++) {
       if (rcvBuffer[i] != NULL)
         delete rcvBuffer[i];
       if (sendBuffer[i] != NULL)
@@ -145,14 +136,14 @@ int RadioInterface::unRadioifyVector(float *floatVector, int offset,
   return newVector.size();
 }
 
-bool RadioInterface::tuneTx(double freq)
+bool RadioInterface::tuneTx(double freq, int chan)
 {
-  return mRadio->setTxFreq(freq);
+  return mRadio->setTxFreq(freq, chan);
 }
 
-bool RadioInterface::tuneRx(double freq)
+bool RadioInterface::tuneRx(double freq, int chan)
 {
-  return mRadio->setRxFreq(freq);
+  return mRadio->setRxFreq(freq, chan);
 }
 
 
@@ -220,10 +211,8 @@ void RadioInterface::driveTransmitRadio(signalVector **radioBurst, bool *zeroBur
     return;
 
   for (i = 0; i < mChanM; i++) {
-    if (chanActive[i]) {
-      radioifyVector(*radioBurst[i], sendBuffer[i] + 2 * sendCursor,
-                     powerScaling, zeroBurst[i]);
-    }
+    radioifyVector(*radioBurst[i], sendBuffer[i] + 2 * sendCursor,
+                   powerScaling, zeroBurst[i]);
   }
 
   /* 
@@ -235,15 +224,10 @@ void RadioInterface::driveTransmitRadio(signalVector **radioBurst, bool *zeroBur
   pushBuffer();
 }
 
-void shiftRxBuffers(float **buf, int offset, int len, int chanM, bool *active)
+static inline void shiftRxBuffers(float **buf, int offset, int len, int chanM)
 {
-  int i;
-
-  for (i = 0; i < chanM; i++) {
-    if (active[i]) {
+  for (int i = 0; i < chanM; i++)
       memmove(buf[i], buf[i] + offset, sizeof(float) * len);
-    }
-  }
 }
 
 void RadioInterface::loadVectors(unsigned tN, int samplesPerBurst,
@@ -252,12 +236,10 @@ void RadioInterface::loadVectors(unsigned tN, int samplesPerBurst,
   int i;
 
   for (i = 0; i < mChanM; i++) {
-    if (chanActive[i]) {
-      signalVector rxVector(samplesPerBurst);
-      unRadioifyVector(rcvBuffer[i], idx * 2, rxVector);
-      radioVector *rxBurst = new radioVector(rxVector, rxClock);
-      mReceiveFIFO[i].write(rxBurst);
-    }
+    signalVector rxVector(samplesPerBurst);
+    unRadioifyVector(rcvBuffer[i], idx * 2, rxVector);
+    radioVector *rxBurst = new radioVector(rxVector, rxClock);
+    mReceiveFIFO[i].write(rxBurst);
   }
 }
 
@@ -299,16 +281,8 @@ void RadioInterface::driveReceiveRadio()
 
   if (readSz > 0) {
     rcvCursor -= readSz;
-    shiftRxBuffers(rcvBuffer, 2 * readSz, 2 * rcvCursor, mChanM, chanActive);
+    shiftRxBuffers(rcvBuffer, 2 * readSz, 2 * rcvCursor, mChanM);
   }
-}
-
-bool RadioInterface::isUnderrun()
-{
-  bool retVal = underrun;
-  underrun = false;
-
-  return retVal;
 }
 
 double RadioInterface::setRxGain(double dB)
@@ -327,14 +301,29 @@ double RadioInterface::getRxGain()
     return -1;
 }
 
+bool RadioInterface::init()
+{
+	for (int i = 0; i < CHAN_MAX; i++) {
+		rx_buf[i] = new short[2 * OUTCHUNK];
+		tx_buf[i] = new short[4 * 2 * INCHUNK];
+	}
+}
+
+void RadioInterface::close()
+{
+	for (int i = 0; i < CHAN_MAX; i++) {
+		delete rx_buf[i];
+		delete tx_buf[i];
+	}
+}
+
 /* Receive a timestamped chunk from the device */ 
 void RadioInterface::pullBuffer()
 {
   bool local_underrun;
 
   /* Read samples. Fail if we don't get what we want. */
-  int num_rd = mRadio->readSamples(rx_buf, OUTCHUNK, &overrun,
-                                   readTimestamp, &local_underrun);
+  int num_rd = mRadio->readSamples(rx_buf, mChanM, OUTCHUNK, readTimestamp);
 
   LOG(DEBUG) << "Rx read " << num_rd << " samples from device";
   assert(num_rd == OUTCHUNK);
@@ -342,7 +331,9 @@ void RadioInterface::pullBuffer()
   underrun |= local_underrun;
   readTimestamp += (TIMESTAMP) num_rd;
 
-  shortToFloat(rcvBuffer + 2 * rcvCursor, rx_buf, num_rd);
+  for (int i = 0; i < mChanM; i++)
+    shortToFloat(rcvBuffer[i] + 2 * rcvCursor, rx_buf[i], num_rd);
+
   rcvCursor += num_rd;
 }
 
@@ -352,13 +343,12 @@ void RadioInterface::pushBuffer()
   if (sendCursor < INCHUNK)
     return;
 
-  floatToShort(tx_buf, sendBuffer, sendCursor);
+  for (int i = 0; i < mChanM; i++)
+    floatToShort(tx_buf[i], sendBuffer[i], sendCursor);
 
   /* Write samples. Fail if we don't get what we want. */
-  int num_smpls = mRadio->writeSamples(tx_buf,
-                                       sendCursor,
-                                       &underrun,
-                                       writeTimestamp);
+  int num_smpls = mRadio->writeSamples(tx_buf, mChanM, sendCursor,
+                                       writeTimestamp, &underrun);
   assert(num_smpls == sendCursor);
 
   writeTimestamp += (TIMESTAMP) num_smpls;

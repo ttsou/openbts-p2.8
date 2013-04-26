@@ -65,10 +65,9 @@ class RadioDevice {
 	@param RSSI The received signal strength of the read result
 	@return The number of samples actually read
   */
-  virtual int readSamples(short *buf, int len, bool *overrun, 
-		   TIMESTAMP timestamp = 0xffffffff,
-		   bool *underrun = 0,
-		   unsigned *RSSI = 0)=0;
+  virtual int readSamples(short **buf, int chans, int len, TIMESTAMP timestamp,
+                          bool *overrun = NULL, bool *underrun = NULL,
+                          unsigned *RSSI = NULL)=0;
   /**
         Write samples to the radio.
         @param buf Contains the data to be written.
@@ -78,18 +77,17 @@ class RadioDevice {
         @param isControl Set if data is a control packet, e.g. a ping command
         @return The number of samples actually written
   */
-  virtual int writeSamples(short *buf, int len, bool *underrun, 
-		    TIMESTAMP timestamp,
-		    bool isControl=false)=0;
+  virtual int writeSamples(short **buf, int chans, int len, TIMESTAMP timestamp,
+                           bool *underrun = NULL, bool isControl = false)=0;
  
   /** Update the alignment between the read and write timestamps */
   virtual bool updateAlignment(TIMESTAMP timestamp)=0;
   
   /** Set the transmitter frequency */
-  virtual bool setTxFreq(double wFreq)=0;
+  virtual bool setTxFreq(double wFreq, int chan = 0)=0;
 
   /** Set the receiver frequency */
-  virtual bool setRxFreq(double wFreq)=0;
+  virtual bool setRxFreq(double wFreq, int chan = 0)=0;
 
   /** Returns the starting write Timestamp*/
   virtual TIMESTAMP initialWriteTimestamp(void)=0;

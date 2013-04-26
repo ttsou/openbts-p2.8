@@ -97,7 +97,6 @@ private:
   double mRxFreq;                      ///< the receive frequency
   double mFreqOffset;                  ///< RF frequency offset
   int mPower;                          ///< the transmit power in dB
-  int mTSC;                            ///< the midamble sequence code
   double mEnergyThreshold;             ///< threshold to determine if received data is potentially a GSM burst
   GSM::Time prevFalseDetectionTime;    ///< last timestamp of a false energy detection
   unsigned mMaxExpectedDelay;            ///< maximum expected time-of-arrival offset in GSM symbols
@@ -121,12 +120,11 @@ public:
       @param wTransmitLatency initial setting of transmit latency
       @param radioInterface associated radioInterface object
   */
-  Transceiver(int wBasePort,
-	      const char *TRXAddress,
-	      int wSamplesPerSymbol,
-	      RadioInterface *wRadioInterface,
-	      DriveLoop *wDriveLoop,
-	      int wChannel, bool wPrimary);
+  Transceiver(int wBasePort, const char *TRXAddress,
+	      DriveLoop *wDriveLoop, RadioInterface *wRadioInterface,
+	      int wSamplesPerSymbol = SAMPSPERSYM,
+	      int wChannel = 0, bool wPrimary = true);
+
   /** Destructor */
   ~Transceiver();
 
