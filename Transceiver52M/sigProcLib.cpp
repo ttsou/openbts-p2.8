@@ -33,6 +33,8 @@
 
 #include <Logger.h>
 
+using namespace GSM;
+
 #define TABLESIZE 1024
 
 /** Lookup tables for trigonometric approximation */

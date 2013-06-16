@@ -33,8 +33,10 @@ Harvind S. Samra, hssamra@kestrelsp.com
 //#include "radioInterface.h"
 #include <Logger.h>
 #include <Configuration.h>
+#include <GSMCommon.h>
 
 using namespace std;
+using namespace GSM;
 
 ConfigurationTable gConfig;
 

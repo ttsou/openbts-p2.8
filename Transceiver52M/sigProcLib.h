@@ -17,10 +17,7 @@
 
 #include "Vector.h"
 #include "Complex.h"
-#include "GSMTransfer.h"
-
-
-using namespace GSM;
+#include "BitVector.h"
 
 /** Indicated signalVector symmetry */
 enum Symmetry {

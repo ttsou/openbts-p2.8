@@ -26,6 +26,8 @@
 #define INCHUNK    (625)
 #define OUTCHUNK   (625)
 
+static const unsigned gSlotLen = 148;      ///< number of symbols per slot, not counting guard periods
+
 /** class to interface the transceiver with the USRP */
 class RadioInterface {
 

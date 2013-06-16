@@ -24,6 +24,7 @@
 
 #include "sigProcLib.h"
 #include "GSMCommon.h"
+#include "Interthread.h"
 
 class radioVector : public signalVector {
 public:

@@ -36,6 +36,8 @@
 #include "config.h"
 #endif
 
+using namespace GSM;
+
 #define USB_LATENCY_INTRVL		10,0
 
 #if USE_UHD
