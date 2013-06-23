@@ -25,6 +25,8 @@
 #include "DriveLoop.h"
 #include <Logger.h>
 
+using namespace GSM;
+
 DriveLoop::DriveLoop(int wBasePort, const char *TRXAddress,
                      RadioInterface *wRadioInterface,
 		     int wChanM, int wC0, int wSamplesPerSymbol,
