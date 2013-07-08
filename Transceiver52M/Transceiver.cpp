@@ -489,7 +489,7 @@ void Transceiver::driveControl()
     int  corrCode;
     int  timeslot;
     sscanf(buffer,"%3s %s %d %d",cmdcheck,command,&timeslot,&corrCode);
-    if ((mTSC<0) || (timeslot < 0) || (timeslot > 7)) {
+    if ((timeslot < 0) || (timeslot > 7)) {
       LOG(WARNING) << "bogus message on control interface";
       sprintf(response,"RSP SETSLOT 1 %d %d",timeslot,corrCode);
       return;
