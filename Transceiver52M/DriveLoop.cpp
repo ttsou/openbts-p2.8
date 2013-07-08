@@ -113,13 +113,6 @@ void DriveLoop::pushRadioVector(GSM::Time &nowTime)
       // Even if the burst is stale, put it in the fillter table.
       // (It might be an idle pattern.)
       LOG(NOTICE) << "dumping STALE burst in TRX->USRP interface";
-      if (i == mC0) {
-        const GSM::Time& nextTime = staleBurst->getTime();
-        int TN = nextTime.TN();
-        int modFN = nextTime.FN() % fillerModulus[i][TN];
-        delete fillerTable[i][modFN][TN];
-        fillerTable[i][modFN][TN] = staleBurst;
-      }
     }
 
     int TN = nowTime.TN();
@@ -132,12 +125,9 @@ void DriveLoop::pushRadioVector(GSM::Time &nowTime)
     // if queue contains data at the desired timestamp, stick it into FIFO
     if (next = (radioVector*) mTransmitPriorityQueue[i].getCurrentBurst(nowTime)) {
       LOG(DEBUG) << "transmitFIFO: wrote burst " << next << " at time: " << nowTime;
-      if (i == mC0) {
-        delete fillerTable[i][modFN][TN];
-        fillerTable[i][modFN][TN] = new signalVector(*(next));
-        mIsFiller[i] = false;
-      } 
       mTxBursts[i] = next;
+      mIsFiller[i] = false;
+      mIsZero[i] = false;
     }
   }
 
