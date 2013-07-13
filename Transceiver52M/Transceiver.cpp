@@ -408,10 +408,8 @@ void Transceiver::driveControl()
     //set expected maximum time-of-arrival
     int newGain;
     sscanf(buffer,"%3s %s %d",cmdcheck,command,&newGain);
-    newGain = mRadioInterface->setRxGain(newGain);
     mEnergyThreshold = INIT_ENERGY_THRSHD;
-    if (mPrimary)
-      newGain = mRadioInterface->setRxGain(newGain);
+    newGain = mRadioInterface->setRxGain(newGain, mChannel);
     sprintf(response,"RSP SETRXGAIN 0 %d",newGain);
   }
   else if (strcmp(command,"NOISELEV")==0) {
@@ -431,8 +429,7 @@ void Transceiver::driveControl()
       sprintf(response,"RSP SETPOWER 1 %d",dbPwr);
     else {
       mPower = dbPwr;
-      if (mPrimary)
-        mRadioInterface->setPowerAttenuation(dbPwr);
+      mRadioInterface->setPowerAttenuation(dbPwr, mChannel);
       sprintf(response,"RSP SETPOWER 0 %d",dbPwr);
     }
   }

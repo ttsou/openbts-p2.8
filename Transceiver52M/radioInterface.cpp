@@ -87,11 +87,11 @@ double RadioInterface::fullScaleOutputValue(void) {
 }
 
 
-void RadioInterface::setPowerAttenuation(double atten)
+void RadioInterface::setPowerAttenuation(double atten, int chan)
 {
   double rfGain, digAtten;
 
-  rfGain = mRadio->setTxGain(mRadio->maxTxGain() - atten);
+  rfGain = mRadio->setTxGain(mRadio->maxTxGain() - atten, chan);
   digAtten = atten - mRadio->maxTxGain() + rfGain;
 
   if (digAtten < 1.0)
@@ -285,18 +285,18 @@ void RadioInterface::driveReceiveRadio()
   }
 }
 
-double RadioInterface::setRxGain(double dB)
+double RadioInterface::setRxGain(double dB, int chan)
 {
   if (mRadio)
-    return mRadio->setRxGain(dB);
+    return mRadio->setRxGain(dB, chan);
   else
     return -1;
 }
 
-double RadioInterface::getRxGain()
+double RadioInterface::getRxGain(int chan)
 {
   if (mRadio)
-    return mRadio->getRxGain();
+    return mRadio->getRxGain(chan);
   else
     return -1;
 }

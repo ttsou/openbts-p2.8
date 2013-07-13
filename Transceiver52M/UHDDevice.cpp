@@ -242,12 +242,12 @@ public:
 	inline double fullScaleInputValue() { return 32000 * TX_AMPL; }
 	inline double fullScaleOutputValue() { return 32000; }
 
-	double setRxGain(double db);
-	double getRxGain(void) { return rx_gain; }
+	double setRxGain(double db, int chan);
+	double getRxGain(int chan) { return !chan ? rx_gain[0] : tx_gain[1]; }
 	double maxRxGain(void) { return rx_gain_max; }
 	double minRxGain(void) { return rx_gain_min; }
 
-	double setTxGain(double db);
+	double setTxGain(double db, int chan);
 	double maxTxGain(void) { return tx_gain_max; }
 	double minTxGain(void) { return tx_gain_min; }
 	void setTxAntenna(std::string &name);
@@ -255,8 +255,8 @@ public:
 	std::string getRxAntenna();
 	std::string getTxAntenna();
 
-	double getTxFreq() { return tx_freq; }
-	double getRxFreq() { return rx_freq; }
+	double getTxFreq(int chan) { return !chan ? tx_freq[0] : tx_freq[1]; }
+	double getRxFreq(int chan) { return !chan ? rx_freq[0] : rx_freq[1]; }
 
 	inline double getSampleRate() { return actual_smpl_rt; }
 	inline double numberRead() { return rx_pkt_cnt; }
@@ -284,10 +284,10 @@ private:
 	int sps;
 	double desired_smpl_rt, actual_smpl_rt;
 
-	double tx_gain, tx_gain_min, tx_gain_max;
-	double rx_gain, rx_gain_min, rx_gain_max;
+	double tx_gain[NUM_TX_CHANS], tx_gain_min, tx_gain_max;
+	double rx_gain[NUM_RX_CHANS], rx_gain_min, rx_gain_max;
 
-	double tx_freq, rx_freq;
+	double tx_freq[NUM_TX_CHANS], rx_freq[NUM_RX_CHANS];
 	size_t tx_spp, rx_spp;
 
 	bool started;
@@ -346,17 +346,25 @@ void uhd_msg_handler(uhd::msg::type_t type, const std::string &msg)
 }
 
 uhd_device::uhd_device(int sps, bool skip_rx)
-	: tx_gain(0.0), tx_gain_min(0.0), tx_gain_max(0.0),
-	  rx_gain(0.0), rx_gain_min(0.0), rx_gain_max(0.0),
-	  tx_freq(0.0), rx_freq(0.0), tx_spp(0), rx_spp(0),
-	  started(false), aligned(false), rx_pkt_cnt(0), drop_cnt(0),
-	  prev_ts(0,0), ts_offset(0), async_event_thrd(NULL)
+	: tx_gain_min(0.0), tx_gain_max(0.0),
+	  rx_gain_min(0.0), rx_gain_max(0.0),
+	  tx_spp(0), rx_spp(0), started(false), aligned(false),
+	  rx_pkt_cnt(0), drop_cnt(0), prev_ts(0,0), ts_offset(0),
+	  async_event_thrd(NULL)
 {
 	this->sps = sps;
 	this->skip_rx = skip_rx;
 
-	for (int i = 0; i < NUM_RX_CHANS; i++)
+	for (int i = 0; i < NUM_TX_CHANS; i++) {
+		tx_freq[i] = 0.0f;
+		tx_gain[i] = 0.0f;
+	}
+
+	for (int i = 0; i < NUM_RX_CHANS; i++) {
 		rx_smpl_buf[i] = NULL;
+		rx_freq[i] = 0.0f;
+		rx_gain[i] = 0.0f;
+	}
 }
 
 uhd_device::~uhd_device()
@@ -381,11 +389,15 @@ void uhd_device::init_gains()
 	rx_gain_min = range.start();
 	rx_gain_max = range.stop();
 
-	usrp_dev->set_tx_gain((tx_gain_min + tx_gain_max) / 2);
-	usrp_dev->set_rx_gain((rx_gain_min + rx_gain_max) / 2);
+	for (int i = 0; i < NUM_TX_CHANS; i++) {
+		usrp_dev->set_tx_gain((tx_gain_min + tx_gain_max) / 2, i);
+		tx_gain[i] = usrp_dev->get_tx_gain(i);
+	}
 
-	tx_gain = usrp_dev->get_tx_gain();
-	rx_gain = usrp_dev->get_rx_gain();
+	for (int i = 0; i < NUM_RX_CHANS; i++) {
+		usrp_dev->set_rx_gain((rx_gain_min + rx_gain_max) / 2, i);
+		rx_gain[i] = usrp_dev->get_rx_gain(i);
+	}
 
 	return;
 }
@@ -455,26 +467,32 @@ int uhd_device::set_rates(double rate)
 	return 0;
 }
 
-double uhd_device::setTxGain(double db)
+double uhd_device::setTxGain(double db, int chan)
 {
-	for (int i = 0; i < NUM_TX_CHANS; i++) {
-		usrp_dev->set_tx_gain(db, i);
-		tx_gain = usrp_dev->get_tx_gain(i);
-		LOG(INFO) << "Set TX gain to " << tx_gain << "dB";
+	if (chan >= NUM_TX_CHANS) {
+		LOG(ALERT) << "Attempting to set gain on non-existent channel";
+		return 0.0f;
 	}
 
-	return tx_gain;
+	usrp_dev->set_tx_gain(db, chan);
+	tx_gain[chan] = usrp_dev->get_tx_gain(chan);
+	LOG(INFO) << "Set TX gain to " << tx_gain[chan] << "dB";
+
+	return tx_gain[chan];
 }
 
-double uhd_device::setRxGain(double db)
+double uhd_device::setRxGain(double db, int chan)
 {
-	for (int i = 0; i < NUM_RX_CHANS; i++) {
-		usrp_dev->set_rx_gain(db);
-		rx_gain = usrp_dev->get_rx_gain();
-		LOG(INFO) << "Set RX gain to " << rx_gain << "dB";
+	if (chan >= NUM_RX_CHANS) {
+		LOG(ALERT) << "Attempting to read gain non-existent channel";
+		return 0.0f;
 	}
 
-	return rx_gain;
+	usrp_dev->set_rx_gain(db, chan);
+	rx_gain[chan] = usrp_dev->get_rx_gain(chan);
+	LOG(INFO) << "Set RX gain to " << rx_gain[chan] << "dB";
+
+	return rx_gain[chan];
 }
 
 void uhd_device::setTxAntenna(std::string &name)
@@ -911,7 +929,7 @@ bool uhd_device::setTxFreq(double wFreq, int chan)
 
 	uhd::tune_result_t tr = usrp_dev->set_tx_freq(wFreq, chan);
 	LOG(INFO) << "\n" << tr.to_pp_string();
-	tx_freq = usrp_dev->get_tx_freq(chan);
+	tx_freq[chan] = usrp_dev->get_tx_freq(chan);
 
 	return true;
 }
@@ -925,7 +943,7 @@ bool uhd_device::setRxFreq(double wFreq, int chan)
 
 	uhd::tune_result_t tr = usrp_dev->set_rx_freq(wFreq, chan);
 	LOG(INFO) << "\n" << tr.to_pp_string();
-	rx_freq = usrp_dev->get_rx_freq(chan);
+	rx_freq[chan] = usrp_dev->get_rx_freq(chan);
 
 	return true;
 }

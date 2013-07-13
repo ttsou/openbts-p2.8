@@ -127,10 +127,10 @@ public:
   bool tuneRx(double freq, int chan = 0);
 
   /** set receive gain */
-  double setRxGain(double dB);
+  double setRxGain(double dB, int chan = 0);
 
   /** get receive gain */
-  double getRxGain(void);
+  double getRxGain(int chan = 0);
 
   /** drive transmission of GSM bursts */
   void driveTransmitRadio(signalVector **radioBurst, bool *zeroBurst);
@@ -138,7 +138,7 @@ public:
   /** drive reception of GSM bursts */
   void driveReceiveRadio();
 
-  void setPowerAttenuation(double atten);
+  void setPowerAttenuation(double atten, int chan = 0);
 
   /** returns the full-scale transmit amplitude **/
   double fullScaleInputValue();

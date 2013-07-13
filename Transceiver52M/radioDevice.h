@@ -102,10 +102,10 @@ class RadioDevice {
   virtual double fullScaleOutputValue()=0;
 
   /** sets the receive chan gain, returns the gain setting **/
-  virtual double setRxGain(double dB)=0;
+  virtual double setRxGain(double dB, int chan = 0)=0;
 
   /** gets the current receive gain **/
-  virtual double getRxGain(void)=0;
+  virtual double getRxGain(int chan = 0)=0;
 
   /** return maximum Rx Gain **/
   virtual double maxRxGain(void) = 0;
@@ -114,7 +114,7 @@ class RadioDevice {
   virtual double minRxGain(void) = 0;
 
   /** sets the transmit chan gain, returns the gain setting **/
-  virtual double setTxGain(double dB)=0;
+  virtual double setTxGain(double dB, int chan = 0)=0;
 
   /** return maximum Tx Gain **/
   virtual double maxTxGain(void) = 0;
@@ -129,8 +129,8 @@ class RadioDevice {
   virtual std::string getTxAntenna() = 0;
 
   /** Return internal status values */
-  virtual double getTxFreq()=0;
-  virtual double getRxFreq()=0;
+  virtual double getTxFreq(int chan = 0)=0;
+  virtual double getRxFreq(int chan = 0)=0;
   virtual double getSampleRate()=0;
   virtual double numberRead()=0;
   virtual double numberWritten()=0;
