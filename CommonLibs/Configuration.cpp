@@ -35,7 +35,7 @@
 #ifdef DEBUG_CONFIG
 #define	debugLogEarly gLogEarly
 #else
-#define	debugLogEarly
+#define	debugLogEarly(x,y,z)
 #endif
 
 
