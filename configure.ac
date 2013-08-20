@@ -22,6 +22,7 @@ AC_INIT(openbts,P2.8TRUNK)
 AC_PREREQ(2.57)
 AC_CONFIG_SRCDIR([Transceiver52M/Makefile.am])
 AC_CONFIG_AUX_DIR([.])	
+AC_CONFIG_MACRO_DIR([config])
 AM_CONFIG_HEADER(config.h)
 
 AC_CANONICAL_BUILD
@@ -95,6 +96,8 @@ AS_IF([test "x$with_usrp1" = "xyes"], [
 AS_IF([test "x$with_uhd" = "xyes"],[
     PKG_CHECK_MODULES(UHD, uhd >= 003.004.000)
     AC_DEFINE(USE_UHD, 1, Define to 1 if using UHD)
+    # Find and define supported SIMD extensions
+    AX_EXT
 ])
 
 AS_IF([test "x$with_extref" = "xyes"], [

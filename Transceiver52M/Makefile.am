@@ -21,19 +21,18 @@
 
 include $(top_srcdir)/Makefile.common
 
+AM_CFLAGS = $(STD_DEFINES_AND_INCLUDES) -std=gnu99 -march=native
+AM_CPPFLAGS = $(STD_DEFINES_AND_INCLUDES)
+AM_CXXFLAGS = -ldl -lpthread
+
 #UHD wins if both are defined
 if UHD
-AM_CPPFLAGS = $(STD_DEFINES_AND_INCLUDES) $(UHD_CFLAGS)
+AM_CPPFLAGS += $(UHD_CFLAGS)
 else
 if USRP1
-AM_CPPFLAGS = $(STD_DEFINES_AND_INCLUDES) $(USRP_CFLAGS)
-else
-#we should never be here, as this doesn't build if one of the above
-#doesn't exist
-AM_CPPFLAGS = $(STD_DEFINES_AND_INCLUDES)
+AM_CPPFLAGS += $(USRP_CFLAGS)
 endif
 endif
-AM_CXXFLAGS = -ldl -lpthread
 
 rev2dir = $(datadir)/usrp/rev2
 rev4dir = $(datadir)/usrp/rev4
@@ -54,14 +53,14 @@ COMMON_SOURCES = \
 	sigProcLib.cpp \
 	DriveLoop.cpp \
 	Transceiver.cpp \
-	DummyLoad.cpp
+	DummyLoad.cpp \
+	convolve.c
 
 libtransceiver_la_SOURCES = \
 	$(COMMON_SOURCES)
 
 noinst_PROGRAMS = \
-	transceiver \
-	sigProcLibTest 
+	transceiver
 
 noinst_HEADERS = \
 	Complex.h \
@@ -74,16 +73,11 @@ noinst_HEADERS = \
 	USRPDevice.h \
 	DummyLoad.h \
 	rcvLPF_651.h \
-	sendLPF_961.h
+	sendLPF_961.h \
+	convolve.h
 
 transceiver_SOURCES = multiTRX.cpp
 transceiver_LDADD = \
-	libtransceiver.la \
-	$(GSM_LA) \
-	$(COMMON_LA) $(SQLITE_LA)
-
-sigProcLibTest_SOURCES = sigProcLibTest.cpp
-sigProcLibTest_LDADD = \
 	libtransceiver.la \
 	$(GSM_LA) \
 	$(COMMON_LA) $(SQLITE_LA)
@@ -92,12 +86,10 @@ sigProcLibTest_LDADD = \
 if UHD
 libtransceiver_la_SOURCES += UHDDevice.cpp
 transceiver_LDADD += $(UHD_LIBS)
-sigProcLibTest_LDADD += $(UHD_LIBS)
 else
 if USRP1
 libtransceiver_la_SOURCES += USRPDevice.cpp
 transceiver_LDADD += $(USRP_LIBS)
-sigProcLibTest_LDADD += $(USRP_LIBS)
 else
 #we should never be here, as one of the above mustbe defined for us to build
 endif
@@ -105,10 +97,3 @@ endif
 
 
 MOSTLYCLEANFILES +=
-
-#radioInterface.cpp
-#ComplexTest.cpp
-#sigProcLibTest.cpp
-#sweepGenerator.cpp
-#testRadio.cpp
-
