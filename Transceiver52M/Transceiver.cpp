@@ -377,9 +377,7 @@ void Transceiver::driveControl()
         mPower = -20;
         mRadioInterface->start();
         mDriveLoop->start();
-
         mDriveLoop->writeClockInterface();
-        generateRACHSequence(mSPS);
 
         // Start radio interface threads.
         mOn = true;

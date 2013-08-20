@@ -119,6 +119,9 @@ int main(int argc, char *argv[])
   DriveLoop *drive = new DriveLoop(SAMPSPERSYM,GSM::Time(3,0),radio);
   Transceiver *trx = new Transceiver(port, addr, SAMPSPERSYM, radio, drive, 0);
   radio->activateChan(0);
+  if (!trx->init()) {
+    LOG(ALERT) << "Failed to initialize transceiver";
+  }
 
 /*
   signalVector *gsmPulse = generateGSMPulse(2,1);
