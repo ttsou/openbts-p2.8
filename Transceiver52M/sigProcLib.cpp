@@ -581,9 +581,9 @@ bool delayVector(signalVector &wBurst, float delay)
     // create sinc function
     signalVector sincVector(21); 
     sincVector.isRealOnly(true);
-    signalVector::iterator sincBurstItr = sincVector.begin();
+    signalVector::iterator sincBurstItr = sincVector.end();
     for (int i = 0; i < 21; i++) 
-      *sincBurstItr++ = (complex) sinc(M_PI_F*(i-10-fracOffset));
+      *--sincBurstItr = (complex) sinc(M_PI_F*(i-10-fracOffset));
   
     signalVector shiftedBurst(wBurst.size());
     if (!convolve(&wBurst, &sincVector, &shiftedBurst, NO_DELAY))
@@ -1394,7 +1394,7 @@ bool designDFE(signalVector &channelResponse,
   }
 
   *feedForwardFilter = new signalVector(Nf);
-  signalVector::iterator w = (*feedForwardFilter)->begin();
+  signalVector::iterator w = (*feedForwardFilter)->end();
   for (int i = 0; i < Nf; i++) {
     delete L[i];
     complex w_i = 0.0;
@@ -1405,8 +1405,7 @@ bool designDFE(signalVector &channelResponse,
       w_i += (*vPtr)*(chanPtr->conj());
       vPtr++; chanPtr++;
     }
-    *w = w_i/d;
-    w++;
+    *--w = w_i/d;
   }
 
 
