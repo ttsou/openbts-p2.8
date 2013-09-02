@@ -81,7 +81,7 @@ private:
    
   signalVector *gsmPulse;              ///< the GSM shaping pulse for modulation
 
-  int mSamplesPerSymbol;               ///< number of samples per GSM symbol
+  int mSPS;               ///< number of samples per GSM symbol
 
   bool mOn;			       ///< flag to indicate that transceiver is powered on
   int fillerModulus[CHAN_MAX][8];                ///< modulus values of all timeslots, in frames
@@ -99,14 +99,14 @@ public:
   /** Transceiver constructor 
       @param wBasePort base port number of UDP sockets
       @param TRXAddress IP address of the TRX manager, as a string
-      @param wSamplesPerSymbol number of samples per GSM symbol
+      @param wSPS number of samples per GSM symbol
       @param wTransmitLatency initial setting of transmit latency
       @param radioInterface associated radioInterface object
   */
   DriveLoop(int wBasePort, const char *TRXAddress,
 	    RadioInterface *wRadioInterface,
 	    int wChanM = 1, int wC0 = 0,
-            int wSamplesPerSymbol = SAMPSPERSYM,
+            int wSPS = SAMPSPERSYM,
 	    GSM::Time wTransmitLatency = GSM::Time(3, 0));
    
   /** Destructor */

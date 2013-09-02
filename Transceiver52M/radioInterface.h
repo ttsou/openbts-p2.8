@@ -56,7 +56,7 @@ protected:
 
   RadioClock mClock;                          ///< the basestation clock!
 
-  int samplesPerSymbol;			      ///< samples per GSM symbol
+  int sps;                                    ///< samples per GSM symbol
   int receiveOffset;                          ///< offset b/w transmit and receive GSM timestamps, in timeslots
 
   bool mOn;				      ///< indicates radio is on
@@ -110,9 +110,9 @@ public:
   /** destructor */
   ~RadioInterface();
 
-  void setSamplesPerSymbol(int wSamplesPerSymbol) {if (!mOn) samplesPerSymbol = wSamplesPerSymbol;}
+  void setSamplesPerSymbol(int sps) {if (!mOn) this->sps = sps;}
 
-  int getSamplesPerSymbol() { return samplesPerSymbol;}
+  int getSamplesPerSymbol() { return sps;}
  
   /** return the receive FIFO */
   VectorFIFO* receiveFIFO(int num) { return &mReceiveFIFO[num];}

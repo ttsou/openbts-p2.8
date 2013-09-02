@@ -44,13 +44,13 @@ int main(int argc, char **argv) {
 
   gLogInit("sigProcLibTest","DEBUG");
 
-  int samplesPerSymbol = 1;
+  int sps = 1;
 
   int TSC = 2;
 
-  sigProcLibSetup(samplesPerSymbol);
+  sigProcLibSetup(sps);
   
-  signalVector *gsmPulse = generateGSMPulse(2,samplesPerSymbol);
+  signalVector *gsmPulse = generateGSMPulse(2,sps);
   cout << *gsmPulse << endl;
 
   BitVector RACHBurstStart = "01010101";
@@ -62,12 +62,12 @@ int main(int argc, char **argv) {
   signalVector *RACHSeq = modulateBurst(RACHBurst,
                                         *gsmPulse,
                                         9,
-                                        samplesPerSymbol);
+                                        sps);
 
-  generateRACHSequence(*gsmPulse,samplesPerSymbol);
+  generateRACHSequence(*gsmPulse,sps);
 
   complex a; float t;
-  detectRACHBurst(*RACHSeq, 5, samplesPerSymbol,&a,&t); 
+  detectRACHBurst(*RACHSeq, 5, sps,&a,&t); 
 
   //cout << *RACHSeq << endl;
   //signalVector *autocorr = correlate(RACHSeq,RACHSeq,NULL,NO_DELAY);
@@ -95,11 +95,11 @@ int main(int argc, char **argv) {
   BitVector normalBurst(BitVector(normalBurstSeg,gTrainingSequence[TSC]),normalBurstSeg);
 
 
-  generateMidamble(*gsmPulse,samplesPerSymbol,TSC);
+  generateMidamble(*gsmPulse,sps,TSC);
 
 
   signalVector *modBurst = modulateBurst(normalBurst,*gsmPulse,
-                                         0,samplesPerSymbol);
+                                         0,sps);
 
   
   //delayVector(*rsVector2,6.932);
@@ -127,13 +127,13 @@ int main(int argc, char **argv) {
   signalVector *noise = gaussianNoise(modBurst->size(),noisePwr);
   */
   float chanRespOffset;
-  analyzeTrafficBurst(*modBurst,TSC,8.0,samplesPerSymbol,&ampl,&TOA,1,true,&chanResp,&chanRespOffset);
+  analyzeTrafficBurst(*modBurst,TSC,8.0,sps,&ampl,&TOA,1,true,&chanResp,&chanRespOffset);
   //addVector(*modBurst,*noise);
 
   cout << "ampl:" << ampl << endl;
   cout << "TOA: " << TOA << endl;
   //cout << "chanResp: " << *chanResp << endl;
-  SoftVector *demodBurst = demodulateBurst(*modBurst,*gsmPulse,samplesPerSymbol,(complex) ampl, TOA);
+  SoftVector *demodBurst = demodulateBurst(*modBurst,*gsmPulse,sps,(complex) ampl, TOA);
   
   cout << *demodBurst << endl;
 
@@ -146,7 +146,7 @@ int main(int argc, char **argv) {
   COUT("b: " << *b);
 
  
-  SoftSig *DFEBurst = equalizeBurst(*modBurst,TOA-chanRespOffset,samplesPerSymbol,*w,*b);
+  SoftSig *DFEBurst = equalizeBurst(*modBurst,TOA-chanRespOffset,sps,*w,*b);
   COUT("DFEBurst: " << *DFEBurst);
 
   delete gsmPulse;

@@ -29,13 +29,13 @@ using namespace GSM;
 
 DriveLoop::DriveLoop(int wBasePort, const char *TRXAddress,
                      RadioInterface *wRadioInterface,
-		     int wChanM, int wC0, int wSamplesPerSymbol,
+		     int wChanM, int wC0, int wSPS,
                      GSM::Time wTransmitLatency)
 	:mClockSocket(wBasePort, TRXAddress, wBasePort + 100), mC0(wC0)
 {
   mChanM = wChanM;
   mRadioDriveLoopThread = NULL;
-  mSamplesPerSymbol = wSamplesPerSymbol;
+  mSPS = wSPS;
   mRadioInterface = wRadioInterface;
 
   mStartTime = (random() % gHyperframe, 0);
@@ -48,16 +48,16 @@ DriveLoop::DriveLoop(int wBasePort, const char *TRXAddress,
   mRadioInterface->getClock()->set(mStartTime);
 
   // generate pulse and setup up signal processing library
-  gsmPulse = generateGSMPulse(2, mSamplesPerSymbol);
+  gsmPulse = generateGSMPulse(2, mSPS);
   LOG(DEBUG) << "gsmPulse: " << *gsmPulse;
-  sigProcLibSetup(mSamplesPerSymbol);
+  sigProcLibSetup(mSPS);
 
   txFullScale = mRadioInterface->fullScaleInputValue();
 
   // initialize filler tables with dummy bursts on C0, empty bursts otherwise
   for (int i = 0; i < 8; i++) {
     signalVector* modBurst = modulateBurst(gDummyBurst, *gsmPulse,
-                                           8 + (i % 4 == 0), mSamplesPerSymbol);
+                                           8 + (i % 4 == 0), mSPS);
     scaleVector(*modBurst, txFullScale);
     for (int j = 0; j < 102; j++) {
       for (int n = 0; n < mChanM; n++) {

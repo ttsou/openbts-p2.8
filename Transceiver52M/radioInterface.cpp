@@ -55,7 +55,7 @@ RadioInterface::RadioInterface(RadioDevice *wRadio,
                                int wReceiveOffset,
 			       GSM::Time wStartTime)
   : mChanM(wChanM), underrun(false), sendCursor(0), rcvCursor(0), mOn(false),
-    mRadio(wRadio), receiveOffset(wReceiveOffset), samplesPerSymbol(wSPS),
+    mRadio(wRadio), receiveOffset(wReceiveOffset), sps(wSPS),
     powerScaling(1.0), loadTest(false)
 {
   mClock.set(wStartTime);
@@ -259,7 +259,7 @@ void RadioInterface::driveReceiveRadio()
   int rcvSz = rcvCursor;
   int readSz = 0;
   const int symbolsPerSlot = gSlotLen + 8;
-  int samplesPerBurst = (symbolsPerSlot + (tN % 4 == 0)) * samplesPerSymbol;
+  int samplesPerBurst = (symbolsPerSlot + (tN % 4 == 0)) * sps;
 
   // while there's enough data in receive buffer, form received 
   //    GSM bursts and pass up to Transceiver
@@ -276,7 +276,7 @@ void RadioInterface::driveReceiveRadio()
     rcvSz -= samplesPerBurst;
 
     tN = rcvClock.TN();
-    samplesPerBurst = (symbolsPerSlot + (tN % 4 == 0)) * samplesPerSymbol;
+    samplesPerBurst = (symbolsPerSlot + (tN % 4 == 0)) * sps;
   }
 
   if (readSz > 0) {
