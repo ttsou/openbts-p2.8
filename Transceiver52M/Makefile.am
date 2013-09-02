@@ -54,7 +54,8 @@ COMMON_SOURCES = \
 	DriveLoop.cpp \
 	Transceiver.cpp \
 	DummyLoad.cpp \
-	convolve.c
+	convolve.c \
+	convert.c
 
 libtransceiver_la_SOURCES = \
 	$(COMMON_SOURCES)
@@ -74,7 +75,8 @@ noinst_HEADERS = \
 	DummyLoad.h \
 	rcvLPF_651.h \
 	sendLPF_961.h \
-	convolve.h
+	convolve.h \
+	convert.h
 
 transceiver_SOURCES = multiTRX.cpp
 transceiver_LDADD = \

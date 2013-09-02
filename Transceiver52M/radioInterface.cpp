@@ -25,29 +25,15 @@
 #include "radioInterface.h"
 #include <Logger.h>
 
+extern "C" {
+#include "convert.h"
+}
+
 bool started = false;
 
 /* Device side buffers */
 static short *rx_buf[CHAN_MAX];
 static short *tx_buf[CHAN_MAX];
-
-/* Complex float to short conversion */
-static void floatToShort(short *out, float *in, int num)
-{
-  for (int i = 0; i < num; i++) {
-    out[2 * i + 0] = (short) in[2 * i + 0];
-    out[2 * i + 1] = (short) in[2 * i + 1];
-  }
-}
-
-/* Complex short to float conversion */
-static void shortToFloat(float *out, short *in, int num)
-{
-  for (int i = 0; i < num; i++) {
-    out[2 * i + 0] = (float) in[2 * i + 0];
-    out[2 * i + 1] = (float) in[2 * i + 1];
-  }
-}
 
 RadioInterface::RadioInterface(RadioDevice *wRadio,
 			       int wChanM,
@@ -332,7 +318,7 @@ void RadioInterface::pullBuffer()
   readTimestamp += (TIMESTAMP) num_rd;
 
   for (int i = 0; i < mChanM; i++)
-    shortToFloat(rcvBuffer[i] + 2 * rcvCursor, rx_buf[i], num_rd);
+    convert_short_float(rcvBuffer[i] + 2 * rcvCursor, rx_buf[i], num_rd * 2);
 
   rcvCursor += num_rd;
 }
@@ -344,7 +330,7 @@ void RadioInterface::pushBuffer()
     return;
 
   for (int i = 0; i < mChanM; i++)
-    floatToShort(tx_buf[i], sendBuffer[i], sendCursor);
+    convert_float_short(tx_buf[i], sendBuffer[i], 1.0, sendCursor * 2);
 
   /* Write samples. Fail if we don't get what we want. */
   int num_smpls = mRadio->writeSamples(tx_buf, mChanM, sendCursor,
