@@ -79,8 +79,6 @@ private:
   /** Pull and demodulate a burst from the receive FIFO */ 
   SoftVector *pullRadioVector(GSM::Time &wTime, int &RSSI, int &timingOffset);
    
-  signalVector *gsmPulse;              ///< the GSM shaping pulse for modulation
-
   int mSPS;               ///< number of samples per GSM symbol
 
   bool mOn;			       ///< flag to indicate that transceiver is powered on
@@ -113,6 +111,7 @@ public:
   ~DriveLoop();
 
   /** start the Transceiver */
+  bool init();
   void start();
 
   VectorQueue *priorityQueue(int m) { return &mTransmitPriorityQueue[m]; }

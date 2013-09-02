@@ -93,7 +93,11 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	DriveLoop *drive = new DriveLoop(5700, "127.0.0.1", radio, numARFCN, 0);
+	DriveLoop *drive;
+	drive = new DriveLoop(5700, "127.0.0.1", radio, numARFCN, 0);
+	if (!drive->init()) {
+		LOG(ALERT) << "Failed to initialize drive loop";
+	}
 
 	Transceiver *trx[CHAN_MAX];
 	bool primary = true;

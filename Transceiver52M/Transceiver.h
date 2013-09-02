@@ -86,8 +86,6 @@ private:
 
   void pullFIFO(void);                 ///< blocking call on receive FIFO 
 
-  signalVector *gsmPulse;              ///< the GSM shaping pulse for modulation
-
   int mSPS;               ///< number of samples per GSM symbol
 
   bool mOn;			       ///< flag to indicate that transceiver is powered on

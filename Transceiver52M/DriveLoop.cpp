@@ -46,18 +46,40 @@ DriveLoop::DriveLoop(int wBasePort, const char *TRXAddress,
   mLastClockUpdateTime = mStartTime;
 
   mRadioInterface->getClock()->set(mStartTime);
-
-  // generate pulse and setup up signal processing library
-  gsmPulse = generateGSMPulse(2, mSPS);
-  LOG(DEBUG) << "gsmPulse: " << *gsmPulse;
-  sigProcLibSetup(mSPS);
-
   txFullScale = mRadioInterface->fullScaleInputValue();
+
+  mOn = false;
+}
+
+DriveLoop::~DriveLoop()
+{
+  if (mOn) {
+    mOn = false;
+
+    if (mRadioDriveLoopThread)
+      delete mRadioDriveLoopThread;
+  }
+
+  sigProcLibDestroy();
+}
+
+bool DriveLoop::init()
+{
+  if (!sigProcLibSetup(mSPS)) {
+    LOG(ALERT) << "Failed to initialize signal processing library";
+    return false;
+  }
 
   // initialize filler tables with dummy bursts on C0, empty bursts otherwise
   for (int i = 0; i < 8; i++) {
-    signalVector* modBurst = modulateBurst(gDummyBurst, *gsmPulse,
+    signalVector* modBurst = modulateBurst(gDummyBurst,
                                            8 + (i % 4 == 0), mSPS);
+    if (!modBurst) {
+      sigProcLibDestroy();
+      LOG(ALERT) << "Failed to initialize filler table";
+      return false;
+    }
+
     scaleVector(*modBurst, txFullScale);
     for (int j = 0; j < 102; j++) {
       for (int n = 0; n < mChanM; n++) {
@@ -75,20 +97,7 @@ DriveLoop::DriveLoop(int wBasePort, const char *TRXAddress,
     }
   }
 
-  mOn = false;
-}
-
-DriveLoop::~DriveLoop()
-{
-  if (mOn) {
-    mOn = false;
-
-    if (mRadioDriveLoopThread)
-      delete mRadioDriveLoopThread;
-  }
-
-  delete gsmPulse;
-  sigProcLibDestroy();
+  return true;
 }
 
 void DriveLoop::start()

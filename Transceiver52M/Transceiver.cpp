@@ -62,10 +62,6 @@ Transceiver::Transceiver(int wBasePort, const char *TRXAddress,
   mTransmitPriorityQueueServiceLoopThread = NULL;
   mMaxExpectedDelay = 0;
 
-  // generate pulse and setup up signal processing library
-  gsmPulse = generateGSMPulse(2,mSPS);
-  LOG(DEBUG) << "gsmPulse: " << *gsmPulse;
-
   mTransmitPriorityQueue = mDriveLoop->priorityQueue(mChannel);
   mReceiveFIFO = mRadioInterface->receiveFIFO(mChannel);
 
@@ -93,7 +89,6 @@ Transceiver::Transceiver(int wBasePort, const char *TRXAddress,
 
 Transceiver::~Transceiver()
 {
-  delete gsmPulse;
   mTransmitPriorityQueue->clear();
 
   delete mFIFOServiceLoopThread;
@@ -107,9 +102,9 @@ void Transceiver::addRadioVector(BitVector &burst,
 				 GSM::Time &wTime)
 {
   // modulate and stick into queue 
-  signalVector* modBurst = modulateBurst(burst,*gsmPulse,
-					 8 + (wTime.TN() % 4 == 0),
-					 mSPS);
+  signalVector* modBurst = modulateBurst(burst,
+                                         8 + (wTime.TN() % 4 == 0),
+                                         mSPS);
   scaleVector(*modBurst,txFullScale * pow(10,-RSSI/10));
   radioVector *newVec = new radioVector(*modBurst,wTime);
   mTransmitPriorityQueue->write(newVec);
@@ -238,7 +233,6 @@ SoftVector *Transceiver::pullRadioVector(GSM::Time &wTime,
   if ((rxBurst) && (success)) {
     if ((corrType == DriveLoop::RACH) || (!needDFE)) {
       burst = demodulateBurst(*vectorBurst,
-			      *gsmPulse,
 			      mSPS,
 			      amplitude,TOA);
     }
@@ -385,7 +379,7 @@ void Transceiver::driveControl()
         mDriveLoop->start();
 
         mDriveLoop->writeClockInterface();
-        generateRACHSequence(*gsmPulse,mSPS);
+        generateRACHSequence(mSPS);
 
         // Start radio interface threads.
         mOn = true;
@@ -477,7 +471,7 @@ void Transceiver::driveControl()
       sprintf(response,"RSP SETTSC 1 %d",TSC);
     else {
       mTSC = TSC;
-      generateMidamble(*gsmPulse,mSPS,TSC);
+      generateMidamble(mSPS, TSC);
       sprintf(response,"RSP SETTSC 0 %d",TSC);
     }
   }
