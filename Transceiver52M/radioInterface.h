@@ -23,7 +23,7 @@
 #include "radioClock.h"
 
 /** samples per GSM symbol */
-#define SAMPSPERSYM 1
+#define SAMPSPERSYM 4
 #define INCHUNK    (625)
 #define OUTCHUNK   (625)
 #define CHAN_MAX    2
