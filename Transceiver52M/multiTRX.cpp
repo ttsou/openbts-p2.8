@@ -26,7 +26,9 @@
 #include "Transceiver.h"
 #include "radioDevice.h"
 
-ConfigurationTable gConfig("/etc/OpenBTS/OpenBTS.db");
+#define CONFIGDB	"/etc/OpenBTS/OpenBTS.db"
+
+ConfigurationTable gConfig(CONFIGDB);
 
 volatile bool gbShutdown = false;
 
@@ -54,10 +56,63 @@ static int setupSignals()
 	return 0;
 }
 
+/*
+ * Attempt to open and test the database file before
+ * accessing the configuration table. We do this because
+ * the global table constructor cannot provide notification
+ * in the event of failure.
+ */
+static int testConfig(const char *filename)
+{
+	int rc, val = 9999;
+	sqlite3 *db;
+	std::string test = "sadf732zdvj2";
+
+	const char *keys[3] = {
+		"Log.Level",
+		"TRX.Port",
+		"TRX.IP",
+	};
+
+	/* Try to open the database	*/
+	rc = sqlite3_open(filename, &db);
+	if (rc || !db) {
+		std::cerr << "Config: Database could not be opened"
+			  << std::endl;
+		return -1;
+	} else {
+		sqlite3_close(db);
+	}
+
+	/* Attempt to set a value in the global config */
+	if (!gConfig.set(test, val)) {
+		std::cerr << "Config: Failed to set test key - "
+			  << "permission to access the database?"
+			  << std::endl;
+		return -1;
+	} else {
+		gConfig.remove(test);
+	}
+
+	/* Attempt to query */
+	for (int i = 0; i < 3; i++) {
+		try {
+			gConfig.getStr(keys[i]); 
+		} catch (...) {
+			std::cerr << "Config: Failed query on "
+				  << keys[i] << std::endl;
+			return -1;
+		}
+	}
+
+	return 0; 
+}
+
+
 int main(int argc, char *argv[])
 {
-	int numARFCN = 1;
-	std::string deviceArgs = "";
+	int trxPort, numARFCN = 1;
+	std::string logLevel, trxAddr, deviceArgs = "";
 
 	switch (argc) {
 	case 3:
@@ -76,13 +131,23 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	gLogInit("transceiver", gConfig.getStr("Log.Level").c_str(), LOG_LOCAL7);
-	srandom(time(NULL));
-
 	if (setupSignals() < 0) {
 		LOG(ERR) << "Failed to setup signal handlers, exiting...";
 		exit(-1);
 	}
+
+	/* Configure logger */
+	if (testConfig(CONFIGDB) < 0) {
+		std::cerr << "Config: Database failure" << std::endl;
+		return EXIT_FAILURE;
+	}
+
+	logLevel = gConfig.getStr("Log.Level");
+	trxPort = gConfig.getNum("TRX.Port");
+	trxAddr = gConfig.getStr("TRX.IP");
+	gLogInit("transceiver", logLevel.c_str(), LOG_LOCAL7);
+
+	srandom(time(NULL));
 
 	RadioDevice *device = RadioDevice::make(SAMPSPERSYM);
 	int radioType = device->open(deviceArgs);
@@ -103,7 +168,7 @@ int main(int argc, char *argv[])
 	}
 
 	DriveLoop *drive;
-	drive = new DriveLoop(5700, "127.0.0.1", radio, numARFCN, 0);
+	drive = new DriveLoop(trxPort, trxAddr.c_str(), radio, numARFCN, 0);
 	if (!drive->init()) {
 		LOG(ALERT) << "Failed to initialize drive loop";
 	}
@@ -111,7 +176,7 @@ int main(int argc, char *argv[])
 	Transceiver *trx[CHAN_MAX];
 	bool primary = true;
 	for (int i = 0; i < numARFCN; i++) {
-		trx[i] = new Transceiver(5700 + 2 * i, "127.0.0.1",
+		trx[i] = new Transceiver(trxPort + 2 * i, trxAddr.c_str(),
 					 drive, radio, SAMPSPERSYM,
 					 i, primary);
 		trx[i]->start();
