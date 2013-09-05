@@ -57,14 +57,23 @@ static int setupSignals()
 int main(int argc, char *argv[])
 {
 	int numARFCN = 1;
+	std::string deviceArgs = "";
 
-	if (argc > 1) {
+	switch (argc) {
+	case 3:
+		deviceArgs = std::string(argv[2]);
+	case 2:
 		numARFCN = atoi(argv[1]);
 		if (numARFCN > CHAN_MAX) {
 			LOG(ALERT) << numARFCN  << " channels not supported "
 						<< " with with current build";
 			exit(-1);
 		}
+	case 1:
+		break;
+	default:
+		std::cout << argv[0] << " <chans> <device args>" << std::endl;
+		return -1;
 	}
 
 	gLogInit("transceiver", gConfig.getStr("Log.Level").c_str(), LOG_LOCAL7);
@@ -76,7 +85,7 @@ int main(int argc, char *argv[])
 	}
 
 	RadioDevice *device = RadioDevice::make(SAMPSPERSYM);
-	int radioType = device->open("");
+	int radioType = device->open(deviceArgs);
 	if (radioType < 0) {
 		LOG(ALERT) << "Failed to open device, exiting...";
 		return EXIT_FAILURE;
