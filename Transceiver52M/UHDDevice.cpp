@@ -44,6 +44,7 @@ enum uhd_dev_type {
 	USRP2,
 	B100,
 	B2XX,
+	E1XX,
 	UMTRX,
 	NUM_USRP_TYPES,
 };
@@ -73,6 +74,8 @@ static struct uhd_dev_offset uhd_offsets[NUM_USRP_TYPES * 2] = {
 	{ B100,  4, 7.9307e-5 },
 	{ B2XX,  1, 9.9692e-5 },
 	{ B2XX,  4, 6.9248e-5 },
+	{ E1XX,  1, 0.0 },
+	{ E1XX,  4, 0.0 },
 	{ UMTRX, 1, 9.9692e-5 },
 	{ UMTRX, 4, 7.3846e-5 },
 };
@@ -111,6 +114,7 @@ static double select_rate(uhd_dev_type type, int sps)
 	case B100:
 		return B100_BASE_RT * sps;
 	case B2XX:
+	case E1XX:
 	case UMTRX:
 		return GSMRATE * sps;
 	default:
@@ -474,7 +478,8 @@ bool uhd_device::parse_dev_type()
 {
 	std::string mboard_str, dev_str;
 	uhd::property_tree::sptr prop_tree;
-	size_t usrp1_str, usrp2_str, b100_str, b200_str, b210_str, umtrx_str;
+	size_t usrp1_str, usrp2_str, b100_str, umtrx_str;
+	size_t b200_str, b210_str, e100_str, e110_str;
 
 	prop_tree = usrp_dev->get_device()->get_tree();
 	dev_str = prop_tree->access<std::string>("/name").get();
@@ -485,6 +490,8 @@ bool uhd_device::parse_dev_type()
 	b100_str = mboard_str.find("B100");
 	b200_str = mboard_str.find("B200");
 	b210_str = mboard_str.find("B210");
+	e100_str = mboard_str.find("E100");
+	e110_str = mboard_str.find("E110");
 	umtrx_str = dev_str.find("UmTRX");
 
 	if (usrp1_str != std::string::npos) {
@@ -504,6 +511,10 @@ bool uhd_device::parse_dev_type()
 		dev_type = B2XX;
 	} else if (b210_str != std::string::npos) {
 		dev_type = B2XX;
+	} else if (e100_str != std::string::npos) {
+		dev_type = E1XX;
+	} else if (e110_str != std::string::npos) {
+		dev_type = E1XX;
 	} else if (usrp2_str != std::string::npos) {
 		dev_type = USRP2;
 	} else if (umtrx_str != std::string::npos) {
@@ -750,7 +761,7 @@ int uhd_device::readSamples(short *buf, int len, bool *overrun,
 					(void*)pkt_buf,
 					rx_spp,
 					metadata,
-					0.1,
+					1.0,
 					true);
 		rx_pkt_cnt++;
 
